@@ -10,7 +10,9 @@ SmartInstantIndex is a Python tool that submits website URLs to Google Search vi
 
 ```bash
 pip install -r requirements.txt
-python index.py
+python index.py        # CLI: run indexing once
+python app.py          # GUI: launch the desktop app
+python build.py        # package GUI as standalone exe via PyInstaller
 ```
 
 There are no tests, no linter config, and no build system beyond `requirements.txt`.
@@ -44,8 +46,13 @@ There are no tests, no linter config, and no build system beyond `requirements.t
 
 ## GUI
 
-`app.py` — desktop GUI built with CustomTkinter. Screens: Dashboard, URLs, Sites, Settings.
+`app.py` — desktop GUI built with CustomTkinter. Screens: Dashboard, URLs, Sites, Settings, Help. Indexing runs in a background thread to keep the UI responsive. All file I/O is resolved relative to `DATA_DIR` (the exe folder when frozen, the script folder otherwise).
+
 `build.py` — packages the GUI as a standalone executable via PyInstaller: `pyinstaller --onefile --windowed --name SmartInstantIndex app.py`
+
+## Known gotcha in sitemaps.py
+
+`fetch_urls_from_sitemap_recursive` uses a mutable default argument (`visited_sitemaps=set()`). This set persists across calls in the same process, so running indexing more than once per process (e.g. via the GUI's "Run Indexing" button) will skip all sitemaps visited in prior runs. The global `ALL_URLS` reset partially mitigates this but the visited set is never cleared.
 
 ## Google API quota note
 
