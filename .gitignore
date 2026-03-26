@@ -166,6 +166,7 @@ urls*.json
 quota.json
 
 venvlinux/
+winvenv/
 
 # Local development tool configs
 .agents/
