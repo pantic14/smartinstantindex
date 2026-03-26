@@ -83,6 +83,7 @@ class App(ctk.CTk):
                 "urls": URLsScreen,
                 "sites": SitesScreen,
                 "settings": SettingsScreen,
+                "help": HelpScreen,
             }[name]
             self.screens[name] = screen_cls(self.content, self)
 
@@ -99,6 +100,7 @@ class Sidebar(ctk.CTkFrame):
         ("urls", "URLs"),
         ("sites", "Sites"),
         ("settings", "Settings"),
+        ("help", "Help"),
     ]
 
     def __init__(self, parent, on_navigate):
@@ -668,6 +670,658 @@ class SettingsScreen(ctk.CTkFrame):
             site[key] = [line.strip() for line in raw.splitlines() if line.strip()]
         save_config(config)
         messagebox.showinfo("Saved", "Settings saved.")
+
+
+# ─── Help content ────────────────────────────────────────────────────────────
+
+HELP_CONTENT = {
+    "English": [
+        (
+            "① How to Add a Site",
+            """\
+1. Click "Sites" in the sidebar.
+
+2. Fill in the form:
+   • Name — A short identifier for your site (e.g. "mysite"). No spaces.
+   • Sitemap URL — The full URL to your sitemap, e.g.:
+       https://example.com/sitemap.xml
+       https://example.com/sitemap-index.xml
+   • Credentials — Path to your Google service account JSON file.
+     Click "Browse" to locate it (see section ② for how to get it).
+   • URLs file — Leave blank. It will be created automatically as
+     urls_{name}.json next to the app.
+
+3. Click "Save". The site will appear in the list above the form.""",
+        ),
+        (
+            "② Google Credentials — Step by Step",
+            """\
+You need a Google service account to use the Indexing API.
+
+STEP 1 — Create a Google Cloud Project
+  • Go to https://console.cloud.google.com
+  • Click the project selector at the top → "New Project"
+  • Give it a name and click "Create"
+
+STEP 2 — Enable the Web Search Indexing API
+  • In the search bar type "Web Search Indexing API"
+  • Click on it → click "ENABLE"
+
+STEP 3 — Create a Service Account
+  • Go to IAM & Admin → Service Accounts → "+ Create Service Account"
+  • Enter any name → click "Create and Continue" → "Done"
+  • Click the service account you just created
+  • Go to the "Keys" tab → "Add Key" → "Create new key" → JSON → "Create"
+  • A .json file will be downloaded. Rename it to credentials.json and
+    place it in the same folder as the app (SmartInstantIndex.exe)
+
+STEP 4 — Add the service account to Google Search Console
+  • Copy the service account email (looks like: name@project.iam.gserviceaccount.com)
+  • Go to https://search.google.com/search-console
+  • Select your property → Settings → Users and permissions
+  • Click "Add user" → paste the email → set role to "Owner" → Add
+
+STEP 5 — Done!
+  • In SmartInstantIndex, go to Sites → Browse → select your credentials.json""",
+        ),
+        (
+            "③ Dashboard",
+            """\
+The Dashboard is your main control panel.
+
+• Site selector — Choose which site you want to work with.
+
+• Stats cards:
+    Total URLs   — Number of URLs found in your sitemap.
+    Indexed      — URLs already submitted to Google.
+    Pending      — URLs not yet submitted.
+    Quota left   — How many URLs you can still submit today
+                   (Google allows max 200 per day per GCP project).
+
+• Run Indexing button — Starts the indexing process:
+    1. Fetches your sitemap and syncs any new/removed URLs.
+    2. Resets URLs whose lastmod changed (if Track lastmod is ON).
+    3. Submits pending URLs to Google up to the daily quota.
+    The progress bar and log show real-time status.
+
+• If you see an error about credentials, check that credentials.json
+  is in the same folder as the app and the path in Sites is correct.""",
+        ),
+        (
+            "④ URLs Panel",
+            """\
+The URLs panel shows every URL found in your sitemap and its status.
+
+• Green ✓ — URL has been submitted to Google.
+• Gray  ✗ — URL is pending (will be submitted on next run).
+
+• Search box — Type any text to filter the list instantly.
+
+• Reset selected — Select one or more rows (use Ctrl+click or
+  Shift+click for multiple) then click this button to mark them as
+  pending. They will be resubmitted on the next run.
+
+• Reset all — Marks ALL URLs as pending. Use this if you want to
+  force Google to re-index everything from scratch.""",
+        ),
+        (
+            "⑤ Settings",
+            """\
+Settings are per-site. Select the site first using the dropdown.
+
+• Track lastmod (ON/OFF)
+    When ON, if your sitemap reports a new lastmod date for a URL,
+    that URL is automatically reset to pending on the next run.
+    Useful for blogs or sites that update their content frequently.
+
+• Skip extensions
+    File types to ignore completely (one per line). Default list
+    includes images, PDFs, videos and archives:
+      .jpg  .jpeg  .png  .gif  .webp  .svg  .pdf  .mp4  .zip
+
+• Exclude patterns
+    If a URL contains any of these strings, it is ignored.
+    Example: adding "/tag/" will skip all tag pages.
+
+• Include patterns (whitelist)
+    If this list is NOT empty, ONLY URLs that contain at least one
+    of these strings will be processed. All others are ignored.
+    Example: adding "/blog/" will process only blog posts.
+    Note: Exclude always wins over Include.
+
+Click "Save settings" to apply changes.""",
+        ),
+    ],
+    "Español": [
+        (
+            "① Cómo añadir un site",
+            """\
+1. Haz clic en "Sites" en la barra lateral.
+
+2. Rellena el formulario:
+   • Name — Un identificador corto para tu web (ej. "miweb"). Sin espacios.
+   • Sitemap URL — La URL completa de tu sitemap, por ejemplo:
+       https://ejemplo.com/sitemap.xml
+       https://ejemplo.com/sitemap-index.xml
+   • Credentials — Ruta al archivo JSON de tu cuenta de servicio de Google.
+     Haz clic en "Browse" para buscarlo (ver sección ② para obtenerlo).
+   • URLs file — Déjalo en blanco. Se creará automáticamente como
+     urls_{name}.json junto a la app.
+
+3. Haz clic en "Save". El site aparecerá en la lista superior.""",
+        ),
+        (
+            "② Credenciales de Google — Paso a paso",
+            """\
+Necesitas una cuenta de servicio de Google para usar la Indexing API.
+
+PASO 1 — Crear un proyecto en Google Cloud
+  • Ve a https://console.cloud.google.com
+  • Haz clic en el selector de proyectos → "Nuevo proyecto"
+  • Ponle un nombre y haz clic en "Crear"
+
+PASO 2 — Activar la Web Search Indexing API
+  • En el buscador escribe "Web Search Indexing API"
+  • Haz clic en ella → haz clic en "HABILITAR"
+
+PASO 3 — Crear una cuenta de servicio
+  • Ve a IAM y administración → Cuentas de servicio → "+ Crear cuenta de servicio"
+  • Escribe cualquier nombre → "Crear y continuar" → "Listo"
+  • Haz clic en la cuenta recién creada
+  • Pestaña "Claves" → "Agregar clave" → "Crear clave nueva" → JSON → "Crear"
+  • Se descargará un archivo .json. Renómbralo como credentials.json y
+    colócalo en la misma carpeta que la app (SmartInstantIndex.exe)
+
+PASO 4 — Añadir la cuenta de servicio a Google Search Console
+  • Copia el email de la cuenta de servicio (ej: nombre@proyecto.iam.gserviceaccount.com)
+  • Ve a https://search.google.com/search-console
+  • Selecciona tu propiedad → Configuración → Usuarios y permisos
+  • Haz clic en "Añadir usuario" → pega el email → rol "Propietario" → Añadir
+
+PASO 5 — ¡Listo!
+  • En SmartInstantIndex, ve a Sites → Browse → selecciona tu credentials.json""",
+        ),
+        (
+            "③ Dashboard",
+            """\
+El Dashboard es tu panel de control principal.
+
+• Selector de site — Elige con qué site quieres trabajar.
+
+• Tarjetas de estadísticas:
+    Total URLs   — Número de URLs en tu sitemap.
+    Indexed      — URLs ya enviadas a Google.
+    Pending      — URLs pendientes de enviar.
+    Quota left   — Cuántas URLs puedes enviar hoy
+                   (Google permite máx. 200 al día por proyecto GCP).
+
+• Botón Run Indexing — Inicia el proceso de indexación:
+    1. Descarga tu sitemap y sincroniza URLs nuevas/eliminadas.
+    2. Resetea URLs cuyo lastmod cambió (si Track lastmod está activado).
+    3. Envía las URLs pendientes a Google hasta agotar la cuota diaria.
+    La barra de progreso y el log muestran el estado en tiempo real.
+
+• Si ves un error de credenciales, comprueba que credentials.json esté
+  en la misma carpeta que la app y que la ruta en Sites sea correcta.""",
+        ),
+        (
+            "④ Panel de URLs",
+            """\
+El panel de URLs muestra todas las URLs de tu sitemap y su estado.
+
+• Verde ✓ — URL enviada a Google.
+• Gris  ✗ — URL pendiente (se enviará en el próximo run).
+
+• Buscador — Escribe cualquier texto para filtrar la lista al instante.
+
+• Reset selected — Selecciona una o varias filas (usa Ctrl+clic o
+  Shift+clic para seleccionar varias) y haz clic en este botón para
+  marcarlas como pendientes. Se reenviarán en el próximo run.
+
+• Reset all — Marca TODAS las URLs como pendientes. Úsalo si quieres
+  forzar a Google a re-indexar todo desde cero.""",
+        ),
+        (
+            "⑤ Settings",
+            """\
+La configuración es por site. Selecciona primero el site con el desplegable.
+
+• Track lastmod (ON/OFF)
+    Cuando está ON, si tu sitemap reporta una nueva fecha lastmod para
+    una URL, esa URL se resetea automáticamente a pendiente en el
+    siguiente run. Útil para blogs o webs que actualizan contenido.
+
+• Skip extensions
+    Tipos de archivo a ignorar completamente (uno por línea). La lista
+    por defecto incluye imágenes, PDFs, vídeos y archivos comprimidos:
+      .jpg  .jpeg  .png  .gif  .webp  .svg  .pdf  .mp4  .zip
+
+• Exclude patterns
+    Si una URL contiene cualquiera de estas cadenas, se ignora.
+    Ejemplo: añadir "/etiqueta/" omitirá todas las páginas de etiquetas.
+
+• Include patterns (lista blanca)
+    Si esta lista NO está vacía, solo se procesarán las URLs que
+    contengan al menos una de estas cadenas. Las demás se ignoran.
+    Ejemplo: añadir "/blog/" procesa solo las entradas del blog.
+    Nota: Exclude siempre tiene prioridad sobre Include.
+
+Haz clic en "Save settings" para aplicar los cambios.""",
+        ),
+    ],
+    "Français": [
+        (
+            "① Comment ajouter un site",
+            """\
+1. Cliquez sur "Sites" dans la barre latérale.
+
+2. Remplissez le formulaire :
+   • Name — Un identifiant court pour votre site (ex. "monsite"). Sans espaces.
+   • Sitemap URL — L'URL complète de votre sitemap, par exemple :
+       https://exemple.com/sitemap.xml
+       https://exemple.com/sitemap-index.xml
+   • Credentials — Chemin vers votre fichier JSON de compte de service Google.
+     Cliquez sur "Browse" pour le localiser (voir section ② pour l'obtenir).
+   • URLs file — Laissez vide. Il sera créé automatiquement sous le nom
+     urls_{name}.json dans le même dossier que l'application.
+
+3. Cliquez sur "Save". Le site apparaîtra dans la liste.""",
+        ),
+        (
+            "② Identifiants Google — Étape par étape",
+            """\
+Vous avez besoin d'un compte de service Google pour utiliser l'Indexing API.
+
+ÉTAPE 1 — Créer un projet Google Cloud
+  • Rendez-vous sur https://console.cloud.google.com
+  • Cliquez sur le sélecteur de projet → "Nouveau projet"
+  • Donnez-lui un nom et cliquez sur "Créer"
+
+ÉTAPE 2 — Activer l'API Web Search Indexing
+  • Dans la barre de recherche, tapez "Web Search Indexing API"
+  • Cliquez dessus → cliquez sur "ACTIVER"
+
+ÉTAPE 3 — Créer un compte de service
+  • Allez dans IAM et administration → Comptes de service → "+ Créer"
+  • Entrez un nom → "Créer et continuer" → "OK"
+  • Cliquez sur le compte créé → onglet "Clés"
+  • "Ajouter une clé" → "Créer une clé" → JSON → "Créer"
+  • Un fichier .json sera téléchargé. Renommez-le credentials.json et
+    placez-le dans le même dossier que l'application (SmartInstantIndex.exe)
+
+ÉTAPE 4 — Ajouter le compte de service à Google Search Console
+  • Copiez l'email du compte (ex : nom@projet.iam.gserviceaccount.com)
+  • Allez sur https://search.google.com/search-console
+  • Sélectionnez votre propriété → Paramètres → Utilisateurs et autorisations
+  • "Ajouter un utilisateur" → collez l'email → rôle "Propriétaire" → Ajouter
+
+ÉTAPE 5 — Terminé !
+  • Dans SmartInstantIndex, allez dans Sites → Browse → sélectionnez credentials.json""",
+        ),
+        (
+            "③ Dashboard",
+            """\
+Le Dashboard est votre panneau de contrôle principal.
+
+• Sélecteur de site — Choisissez le site avec lequel travailler.
+
+• Cartes de statistiques :
+    Total URLs   — Nombre d'URLs dans votre sitemap.
+    Indexed      — URLs déjà soumises à Google.
+    Pending      — URLs en attente de soumission.
+    Quota left   — Combien d'URLs vous pouvez encore soumettre aujourd'hui
+                   (Google autorise max. 200 par jour par projet GCP).
+
+• Bouton Run Indexing — Lance le processus d'indexation :
+    1. Récupère votre sitemap et synchronise les URLs nouvelles/supprimées.
+    2. Réinitialise les URLs dont le lastmod a changé (si Track lastmod est ON).
+    3. Soumet les URLs en attente à Google jusqu'au quota journalier.
+    La barre de progression et le journal affichent l'état en temps réel.
+
+• En cas d'erreur de credentials, vérifiez que credentials.json est bien
+  dans le même dossier que l'app et que le chemin dans Sites est correct.""",
+        ),
+        (
+            "④ Panneau URLs",
+            """\
+Le panneau URLs affiche toutes les URLs de votre sitemap et leur état.
+
+• Vert  ✓ — URL soumise à Google.
+• Gris  ✗ — URL en attente (sera soumise lors du prochain run).
+
+• Barre de recherche — Tapez du texte pour filtrer la liste instantanément.
+
+• Reset selected — Sélectionnez une ou plusieurs lignes (Ctrl+clic ou
+  Shift+clic pour plusieurs) puis cliquez pour les marquer comme en attente.
+  Elles seront resoumises lors du prochain run.
+
+• Reset all — Marque TOUTES les URLs comme en attente. À utiliser si vous
+  souhaitez forcer Google à réindexer tout depuis le début.""",
+        ),
+        (
+            "⑤ Settings",
+            """\
+Les paramètres sont par site. Sélectionnez d'abord le site dans la liste.
+
+• Track lastmod (ON/OFF)
+    Quand ON, si votre sitemap signale une nouvelle date lastmod pour une
+    URL, cette URL est automatiquement remise en attente lors du prochain run.
+    Utile pour les blogs ou les sites qui mettent à jour leur contenu.
+
+• Skip extensions
+    Types de fichiers à ignorer complètement (un par ligne). La liste
+    par défaut inclut images, PDFs, vidéos et archives :
+      .jpg  .jpeg  .png  .gif  .webp  .svg  .pdf  .mp4  .zip
+
+• Exclude patterns
+    Si une URL contient l'une de ces chaînes, elle est ignorée.
+    Exemple : ajouter "/tag/" ignorera toutes les pages de tags.
+
+• Include patterns (liste blanche)
+    Si cette liste n'est PAS vide, seules les URLs contenant au moins
+    une de ces chaînes seront traitées. Toutes les autres sont ignorées.
+    Exemple : ajouter "/blog/" traite uniquement les articles de blog.
+    Note : Exclude a toujours priorité sur Include.
+
+Cliquez sur "Save settings" pour appliquer les modifications.""",
+        ),
+    ],
+    "Português": [
+        (
+            "① Como adicionar um site",
+            """\
+1. Clique em "Sites" na barra lateral.
+
+2. Preencha o formulário:
+   • Name — Um identificador curto para o seu site (ex. "meusite"). Sem espaços.
+   • Sitemap URL — A URL completa do seu sitemap, por exemplo:
+       https://exemplo.com/sitemap.xml
+       https://exemplo.com/sitemap-index.xml
+   • Credentials — Caminho para o ficheiro JSON da sua conta de serviço Google.
+     Clique em "Browse" para o localizar (ver secção ② para obtê-lo).
+   • URLs file — Deixe em branco. Será criado automaticamente como
+     urls_{name}.json na mesma pasta da aplicação.
+
+3. Clique em "Save". O site aparecerá na lista.""",
+        ),
+        (
+            "② Credenciais do Google — Passo a passo",
+            """\
+Precisa de uma conta de serviço Google para usar a Indexing API.
+
+PASSO 1 — Criar um projeto no Google Cloud
+  • Aceda a https://console.cloud.google.com
+  • Clique no seletor de projeto → "Novo projeto"
+  • Dê-lhe um nome e clique em "Criar"
+
+PASSO 2 — Ativar a Web Search Indexing API
+  • Na barra de pesquisa escreva "Web Search Indexing API"
+  • Clique nela → clique em "ATIVAR"
+
+PASSO 3 — Criar uma conta de serviço
+  • Vá a IAM e administração → Contas de serviço → "+ Criar conta de serviço"
+  • Introduza um nome → "Criar e continuar" → "Concluído"
+  • Clique na conta criada → separador "Chaves"
+  • "Adicionar chave" → "Criar nova chave" → JSON → "Criar"
+  • Um ficheiro .json será descarregado. Renomeie-o para credentials.json e
+    coloque-o na mesma pasta da aplicação (SmartInstantIndex.exe)
+
+PASSO 4 — Adicionar a conta de serviço ao Google Search Console
+  • Copie o email da conta (ex: nome@projeto.iam.gserviceaccount.com)
+  • Aceda a https://search.google.com/search-console
+  • Selecione a sua propriedade → Definições → Utilizadores e permissões
+  • "Adicionar utilizador" → cole o email → função "Proprietário" → Adicionar
+
+PASSO 5 — Concluído!
+  • No SmartInstantIndex, vá a Sites → Browse → selecione credentials.json""",
+        ),
+        (
+            "③ Dashboard",
+            """\
+O Dashboard é o seu painel de controlo principal.
+
+• Seletor de site — Escolha com qual site pretende trabalhar.
+
+• Cartões de estatísticas:
+    Total URLs   — Número de URLs no seu sitemap.
+    Indexed      — URLs já submetidas ao Google.
+    Pending      — URLs ainda por submeter.
+    Quota left   — Quantas URLs pode ainda submeter hoje
+                   (Google permite máx. 200 por dia por projeto GCP).
+
+• Botão Run Indexing — Inicia o processo de indexação:
+    1. Obtém o sitemap e sincroniza URLs novas/removidas.
+    2. Repõe URLs cujo lastmod mudou (se Track lastmod estiver ON).
+    3. Submete as URLs pendentes ao Google até ao limite diário.
+    A barra de progresso e o registo mostram o estado em tempo real.
+
+• Se receber um erro de credenciais, verifique que credentials.json está
+  na mesma pasta da aplicação e que o caminho em Sites está correto.""",
+        ),
+        (
+            "④ Painel de URLs",
+            """\
+O painel de URLs mostra todas as URLs do seu sitemap e o respetivo estado.
+
+• Verde ✓ — URL submetida ao Google.
+• Cinza ✗ — URL pendente (será submetida no próximo run).
+
+• Caixa de pesquisa — Escreva qualquer texto para filtrar a lista instantaneamente.
+
+• Reset selected — Selecione uma ou mais linhas (Ctrl+clique ou
+  Shift+clique para várias) e clique para as marcar como pendentes.
+  Serão resubmetidas no próximo run.
+
+• Reset all — Marca TODAS as URLs como pendentes. Use se pretender
+  forçar o Google a re-indexar tudo desde o início.""",
+        ),
+        (
+            "⑤ Settings",
+            """\
+As definições são por site. Selecione primeiro o site na lista.
+
+• Track lastmod (ON/OFF)
+    Quando ON, se o sitemap reportar uma nova data lastmod para uma URL,
+    essa URL é automaticamente reposta como pendente no próximo run.
+    Útil para blogs ou sites que atualizam o seu conteúdo frequentemente.
+
+• Skip extensions
+    Tipos de ficheiro a ignorar completamente (um por linha). A lista
+    predefinida inclui imagens, PDFs, vídeos e arquivos:
+      .jpg  .jpeg  .png  .gif  .webp  .svg  .pdf  .mp4  .zip
+
+• Exclude patterns
+    Se uma URL contiver alguma destas cadeias, é ignorada.
+    Exemplo: adicionar "/tag/" ignorará todas as páginas de tags.
+
+• Include patterns (lista branca)
+    Se esta lista NÃO estiver vazia, apenas as URLs que contiverem
+    pelo menos uma destas cadeias serão processadas. As restantes são ignoradas.
+    Exemplo: adicionar "/blog/" processa apenas os artigos do blog.
+    Nota: Exclude tem sempre prioridade sobre Include.
+
+Clique em "Save settings" para aplicar as alterações.""",
+        ),
+    ],
+    "Deutsch": [
+        (
+            "① Eine Website hinzufügen",
+            """\
+1. Klicken Sie in der Seitenleiste auf "Sites".
+
+2. Füllen Sie das Formular aus:
+   • Name — Eine kurze Kennung für Ihre Website (z. B. "meineseite"). Keine Leerzeichen.
+   • Sitemap URL — Die vollständige URL Ihrer Sitemap, z. B.:
+       https://beispiel.com/sitemap.xml
+       https://beispiel.com/sitemap-index.xml
+   • Credentials — Pfad zur JSON-Datei Ihres Google-Dienstkontos.
+     Klicken Sie auf "Browse" (siehe Abschnitt ② für die Erstellung).
+   • URLs file — Leer lassen. Die Datei wird automatisch als
+     urls_{name}.json neben der App erstellt.
+
+3. Klicken Sie auf "Save". Die Website erscheint in der Liste.""",
+        ),
+        (
+            "② Google-Zugangsdaten — Schritt für Schritt",
+            """\
+Sie benötigen ein Google-Dienstkonto, um die Indexing API zu nutzen.
+
+SCHRITT 1 — Google Cloud-Projekt erstellen
+  • Gehen Sie zu https://console.cloud.google.com
+  • Klicken Sie auf die Projektauswahl → "Neues Projekt"
+  • Geben Sie einen Namen ein und klicken Sie auf "Erstellen"
+
+SCHRITT 2 — Web Search Indexing API aktivieren
+  • Geben Sie in der Suchleiste "Web Search Indexing API" ein
+  • Klicken Sie darauf → klicken Sie auf "AKTIVIEREN"
+
+SCHRITT 3 — Dienstkonto erstellen
+  • Gehen Sie zu IAM & Verwaltung → Dienstkonten → "+ Erstellen"
+  • Geben Sie einen Namen ein → "Erstellen und fortfahren" → "Fertig"
+  • Klicken Sie auf das erstellte Konto → Registerkarte "Schlüssel"
+  • "Schlüssel hinzufügen" → "Neuen Schlüssel erstellen" → JSON → "Erstellen"
+  • Eine .json-Datei wird heruntergeladen. Benennen Sie sie in credentials.json um
+    und legen Sie sie in den gleichen Ordner wie die App (SmartInstantIndex.exe)
+
+SCHRITT 4 — Dienstkonto zur Google Search Console hinzufügen
+  • Kopieren Sie die E-Mail des Dienstkontos (z. B. name@projekt.iam.gserviceaccount.com)
+  • Gehen Sie zu https://search.google.com/search-console
+  • Wählen Sie Ihre Property → Einstellungen → Nutzer und Berechtigungen
+  • "Nutzer hinzufügen" → E-Mail einfügen → Rolle "Inhaber" → Hinzufügen
+
+SCHRITT 5 — Fertig!
+  • Gehen Sie in SmartInstantIndex zu Sites → Browse → wählen Sie credentials.json""",
+        ),
+        (
+            "③ Dashboard",
+            """\
+Das Dashboard ist Ihr Hauptsteuerungspanel.
+
+• Website-Auswahl — Wählen Sie, mit welcher Website Sie arbeiten möchten.
+
+• Statistikkarten:
+    Total URLs   — Anzahl der URLs in Ihrer Sitemap.
+    Indexed      — Bereits an Google übermittelte URLs.
+    Pending      — Noch nicht übermittelte URLs.
+    Quota left   — Wie viele URLs Sie heute noch einreichen können
+                   (Google erlaubt max. 200 pro Tag und GCP-Projekt).
+
+• Schaltfläche Run Indexing — Startet den Indexierungsprozess:
+    1. Ruft Ihre Sitemap ab und synchronisiert neue/gelöschte URLs.
+    2. Setzt URLs zurück, deren lastmod sich geändert hat (wenn Track lastmod ON).
+    3. Übermittelt ausstehende URLs an Google bis zum Tageslimit.
+    Fortschrittsbalken und Protokoll zeigen den Status in Echtzeit.
+
+• Bei einem Credentials-Fehler prüfen Sie, ob credentials.json im gleichen
+  Ordner wie die App liegt und ob der Pfad unter Sites korrekt ist.""",
+        ),
+        (
+            "④ URLs-Panel",
+            """\
+Das URLs-Panel zeigt alle URLs Ihrer Sitemap und deren Status.
+
+• Grün ✓ — URL wurde an Google übermittelt.
+• Grau ✗ — URL ist ausstehend (wird beim nächsten Run übermittelt).
+
+• Suchfeld — Geben Sie Text ein, um die Liste sofort zu filtern.
+
+• Reset selected — Wählen Sie eine oder mehrere Zeilen aus (Strg+Klick
+  oder Umschalt+Klick für mehrere) und klicken Sie, um sie als ausstehend
+  zu markieren. Sie werden beim nächsten Run erneut übermittelt.
+
+• Reset all — Markiert ALLE URLs als ausstehend. Verwenden Sie dies,
+  wenn Google alles von Grund auf neu indexieren soll.""",
+        ),
+        (
+            "⑤ Einstellungen (Settings)",
+            """\
+Einstellungen gelten pro Website. Wählen Sie zuerst die Website aus.
+
+• Track lastmod (AN/AUS)
+    Wenn AN, wird eine URL automatisch als ausstehend markiert, wenn
+    die Sitemap ein neues lastmod-Datum meldet. Nützlich für Blogs oder
+    Websites, die häufig Inhalte aktualisieren.
+
+• Skip extensions
+    Dateitypen, die vollständig ignoriert werden (einer pro Zeile).
+    Die Standardliste enthält Bilder, PDFs, Videos und Archive:
+      .jpg  .jpeg  .png  .gif  .webp  .svg  .pdf  .mp4  .zip
+
+• Exclude patterns
+    URLs, die einen dieser Strings enthalten, werden ignoriert.
+    Beispiel: "/tag/" hinzufügen ignoriert alle Tag-Seiten.
+
+• Include patterns (Whitelist)
+    Wenn diese Liste NICHT leer ist, werden NUR URLs verarbeitet,
+    die mindestens einen dieser Strings enthalten. Alle anderen werden ignoriert.
+    Beispiel: "/blog/" hinzufügen verarbeitet nur Blog-Beiträge.
+    Hinweis: Exclude hat immer Vorrang vor Include.
+
+Klicken Sie auf "Save settings", um die Änderungen zu übernehmen.""",
+        ),
+    ],
+}
+
+
+# ─── Help Screen ─────────────────────────────────────────────────────────────
+
+class HelpScreen(ctk.CTkFrame):
+    LANGUAGES = ["English", "Español", "Français", "Português", "Deutsch"]
+
+    def __init__(self, parent, app):
+        super().__init__(parent, corner_radius=0)
+        self.app = app
+        self.grid_columnconfigure(0, weight=1)
+        self.grid_rowconfigure(2, weight=1)
+
+        ctk.CTkLabel(self, text="Help", font=ctk.CTkFont(size=20, weight="bold")).grid(
+            row=0, column=0, padx=30, pady=(20, 10), sticky="w"
+        )
+
+        # Language selector
+        lang_frame = ctk.CTkFrame(self)
+        lang_frame.grid(row=1, column=0, padx=30, pady=5, sticky="w")
+        ctk.CTkLabel(lang_frame, text="Language:").pack(side="left", padx=(0, 8))
+        self.lang_var = ctk.StringVar(value="English")
+        ctk.CTkOptionMenu(
+            lang_frame, variable=self.lang_var, width=160,
+            values=self.LANGUAGES,
+            command=lambda _: self._render(),
+        ).pack(side="left")
+
+        # Scrollable content
+        self.scroll = ctk.CTkScrollableFrame(self)
+        self.scroll.grid(row=2, column=0, padx=30, pady=(5, 20), sticky="nsew")
+        self.scroll.grid_columnconfigure(0, weight=1)
+
+        self._render()
+
+    def on_show(self):
+        pass  # content is static, no reload needed
+
+    def _render(self):
+        for w in self.scroll.winfo_children():
+            w.destroy()
+
+        lang = self.lang_var.get()
+        sections = HELP_CONTENT.get(lang, HELP_CONTENT["English"])
+
+        for i, (title, text) in enumerate(sections):
+            ctk.CTkLabel(
+                self.scroll, text=title,
+                font=ctk.CTkFont(size=14, weight="bold"),
+                anchor="w",
+            ).grid(row=i * 2, column=0, sticky="ew", padx=10, pady=(16, 2))
+
+            tb = ctk.CTkTextbox(self.scroll, height=self._text_height(text), wrap="word")
+            tb.insert("1.0", text)
+            tb.configure(state="disabled")
+            tb.grid(row=i * 2 + 1, column=0, sticky="ew", padx=10, pady=(0, 4))
+
+    @staticmethod
+    def _text_height(text):
+        lines = text.count("\n") + 1
+        return min(max(lines * 20, 80), 400)
 
 
 # ─── Entry point ─────────────────────────────────────────────────────────────
