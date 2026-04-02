@@ -24,6 +24,7 @@ from smartinstantindex.utils import (
 )
 from smartinstantindex.sitemaps import fetch_urls_from_sitemap_recursive
 from smartinstantindex.indexing import index_url
+from smartinstantindex.searchconsole import fetch_indexed_pages
 
 ctk.set_appearance_mode("dark")
 ctk.set_default_color_theme("blue")
@@ -321,6 +322,7 @@ class DashboardScreen(ctk.CTkFrame):
 
 # ─── URLs Screen ─────────────────────────────────────────────────────────────
 
+
 class URLsScreen(ctk.CTkFrame):
     def __init__(self, parent, app):
         super().__init__(parent, corner_radius=0)
@@ -349,15 +351,21 @@ class URLsScreen(ctk.CTkFrame):
             row=0, column=2, padx=(0, 10), sticky="ew"
         )
 
-        self._fetch_btn = ctk.CTkButton(top, text="Fetch URLs", width=100, command=self._fetch_urls)
-        self._fetch_btn.grid(row=0, column=3, padx=(0, 6))
-        ctk.CTkButton(top, text="Mark indexed", width=110, command=self._mark_selected_indexed).grid(row=0, column=4, padx=(0, 6))
-        ctk.CTkButton(top, text="Reset selected", width=110, command=self._reset_selected).grid(row=0, column=5, padx=(0, 6))
-        ctk.CTkButton(top, text="Reset all", width=90, command=self._reset_all).grid(row=0, column=6, padx=(0, 10))
+        # Buttons row — all packed left-to-right in a subframe
+        btn_row = ctk.CTkFrame(top, fg_color="transparent")
+        btn_row.grid(row=1, column=0, columnspan=3, padx=(10, 0), pady=(4, 0), sticky="w")
+
+        self._fetch_btn = ctk.CTkButton(btn_row, text="Fetch URLs", width=100, command=self._fetch_urls)
+        self._fetch_btn.pack(side="left", padx=(0, 6))
+        ctk.CTkButton(btn_row, text="Mark indexed", width=110, command=self._mark_selected_indexed).pack(side="left", padx=(0, 6))
+        ctk.CTkButton(btn_row, text="Reset selected", width=110, command=self._reset_selected).pack(side="left", padx=(0, 6))
+        ctk.CTkButton(btn_row, text="Reset all", width=90, command=self._reset_all).pack(side="left", padx=(0, 6))
+        self._gsc_btn = ctk.CTkButton(btn_row, text="Sync from GSC", width=120, command=self._check_gsc)
+        self._gsc_btn.pack_forget()  # oculto hasta que el site tenga site_url configurado
 
         self._fetch_status = ctk.StringVar()
         ctk.CTkLabel(top, textvariable=self._fetch_status, font=ctk.CTkFont(size=11), text_color="#aaaaaa").grid(
-            row=1, column=0, columnspan=7, padx=10, pady=(0, 6), sticky="w"
+            row=2, column=0, columnspan=3, padx=10, pady=(2, 6), sticky="w"
         )
 
         # Treeview with scrollbar
@@ -377,7 +385,7 @@ class URLsScreen(ctk.CTkFrame):
 
         self.tree = ttk.Treeview(
             tree_frame,
-            columns=("url", "status", "lastmod", "submitted"),
+            columns=("url", "status", "lastmod", "submitted", "gsc"),
             show="headings",
             selectmode="extended",
         )
@@ -385,10 +393,12 @@ class URLsScreen(ctk.CTkFrame):
         self.tree.heading("status", text="Status")
         self.tree.heading("lastmod", text="lastmod")
         self.tree.heading("submitted", text="Submitted")
+        self.tree.heading("gsc", text="GSC Sync")
         self.tree.column("url", stretch=True, minwidth=200)
         self.tree.column("status", width=80, anchor="center", stretch=False)
         self.tree.column("lastmod", width=130, anchor="center", stretch=False)
         self.tree.column("submitted", width=130, anchor="center", stretch=False)
+        self.tree.column("gsc", width=120, anchor="center", stretch=False)
 
         vsb = ttk.Scrollbar(tree_frame, orient="vertical", command=self.tree.yview)
         self.tree.configure(yscrollcommand=vsb.set)
@@ -401,6 +411,7 @@ class URLsScreen(ctk.CTkFrame):
         self._all_urls = {}
         self._loaded_site = None   # tracks which site is currently loaded
         self._debounce_id = None   # for search debounce
+        self._gsc_running = False
 
     def on_show(self):
         config = get_config()
@@ -419,6 +430,11 @@ class URLsScreen(ctk.CTkFrame):
         site = next((s for s in config.get("sites", []) if s["name"] == current_site), None)
         self._all_urls = migrate_urls(load_json(data_path(site["urls_file"]))) if site else {}
         self._loaded_site = current_site
+        has_gsc = bool(site and site.get("site_url"))
+        if has_gsc:
+            self._gsc_btn.pack(side="left", padx=(0, 6))
+        else:
+            self._gsc_btn.pack_forget()
         self._filter_table()
 
     def _debounce_filter(self):
@@ -435,7 +451,13 @@ class URLsScreen(ctk.CTkFrame):
                 continue
             status = "✓" if entry["indexed"] else "✗"
             tag = "indexed" if entry["indexed"] else "pending"
-            self.tree.insert("", "end", iid=url, values=(url, status, entry.get("lastmod") or "—", entry.get("indexed_at") or "—"), tags=(tag,))
+            gsc_synced = "✓" if entry.get("sc_synced_at") else "—"
+            self.tree.insert("", "end", iid=url, values=(
+                url, status,
+                entry.get("lastmod") or "—",
+                entry.get("indexed_at") or "—",
+                gsc_synced,
+            ), tags=(tag,))
 
     def _fetch_urls(self):
         site = self._get_site()
@@ -527,6 +549,43 @@ class URLsScreen(ctk.CTkFrame):
         save_urls_to_file(self._all_urls, data_path(site["urls_file"]))
         self._filter_table()
 
+    def _check_gsc(self):
+        if self._gsc_running:
+            return
+        site = self._get_site()
+        if not site or not site.get("site_url"):
+            return
+        self._gsc_running = True
+        self._gsc_btn.configure(state="disabled", text="Syncing…")
+        self._fetch_status.set("Connecting to Google Search Console…")
+        threading.Thread(target=self._run_gsc_sync, args=(site,), daemon=True).start()
+
+    def _run_gsc_sync(self, site):
+        creds_path = data_path(site["credentials"])
+        site_url = site["site_url"]
+        today = str(date.today())
+        try:
+            gsc_pages = fetch_indexed_pages(site_url, creds_path)
+            marked = 0
+            for url, entry in self._all_urls.items():
+                if url in gsc_pages:
+                    entry["sc_synced_at"] = today
+                    if not entry.get("indexed"):
+                        entry["indexed"] = True
+                        entry["indexed_at"] = today
+                        marked += 1
+            save_urls_to_file(self._all_urls, data_path(site["urls_file"]))
+            msg = f"GSC sync done: {len(gsc_pages)} pages found in GSC, {marked} newly marked as indexed."
+            self.after(0, lambda m=msg: self._fetch_status.set(m))
+            self.after(0, self._filter_table)
+        except Exception as e:
+            err = str(e)
+            self.after(0, lambda m=err: self._fetch_status.set("GSC error — see details"))
+            self.after(0, lambda m=err: messagebox.showerror("GSC Sync Error", m))
+        finally:
+            self._gsc_running = False
+            self.after(0, lambda: self._gsc_btn.configure(state="normal", text="Sync from GSC"))
+
 
 # ─── Sites Screen ────────────────────────────────────────────────────────────
 
@@ -556,7 +615,8 @@ class SitesScreen(ctk.CTkFrame):
             row=0, column=0, columnspan=3, padx=10, pady=(10, 6), sticky="w"
         )
 
-        fields = [("Name", "name"), ("Sitemap URL", "sitemap_url"), ("URLs file", "urls_file")]
+        fields = [("Name", "name"), ("Sitemap URL", "sitemap_url"), ("URLs file", "urls_file"),
+                  ("GSC Property URL", "site_url")]
         self.form_vars = {}
         for i, (label, key) in enumerate(fields, 1):
             ctk.CTkLabel(form, text=label).grid(row=i, column=0, padx=10, pady=4, sticky="e")
@@ -564,16 +624,21 @@ class SitesScreen(ctk.CTkFrame):
             self.form_vars[key] = var
             ctk.CTkEntry(form, textvariable=var).grid(row=i, column=1, padx=10, pady=4, sticky="ew")
 
-        ctk.CTkLabel(form, text="Credentials").grid(row=4, column=0, padx=10, pady=4, sticky="e")
+        ctk.CTkLabel(form, text="Use sc-domain:example.com (recommended)",
+                     text_color="gray", font=ctk.CTkFont(size=10)).grid(
+            row=4, column=2, padx=(0, 10), sticky="w"
+        )
+
+        ctk.CTkLabel(form, text="Credentials").grid(row=5, column=0, padx=10, pady=4, sticky="e")
         self.form_vars["credentials"] = ctk.StringVar()
         ctk.CTkEntry(form, textvariable=self.form_vars["credentials"]).grid(
-            row=4, column=1, padx=10, pady=4, sticky="ew"
+            row=5, column=1, padx=10, pady=4, sticky="ew"
         )
         ctk.CTkButton(form, text="Browse", width=70,
-                      command=self._pick_credentials).grid(row=4, column=2, padx=(0, 10))
+                      command=self._pick_credentials).grid(row=5, column=2, padx=(0, 10))
 
         btn_frame = ctk.CTkFrame(form)
-        btn_frame.grid(row=5, column=0, columnspan=3, pady=10)
+        btn_frame.grid(row=6, column=0, columnspan=3, pady=10)
         ctk.CTkButton(btn_frame, text="Save", command=self._save_site).pack(side="left", padx=6)
         ctk.CTkButton(btn_frame, text="Clear", command=self._clear_form).pack(side="left", padx=6)
 
@@ -620,6 +685,7 @@ class SitesScreen(ctk.CTkFrame):
         self.form_vars["sitemap_url"].set(site.get("sitemap_url", ""))
         self.form_vars["credentials"].set(site.get("credentials", "credentials.json"))
         self.form_vars["urls_file"].set(site.get("urls_file", ""))
+        self.form_vars["site_url"].set(site.get("site_url", ""))
 
     def _delete_site(self, idx):
         config = get_config()
@@ -644,6 +710,7 @@ class SitesScreen(ctk.CTkFrame):
             "sitemap_url": sitemap_url,
             "credentials": self.form_vars["credentials"].get().strip() or "credentials.json",
             "urls_file": self.form_vars["urls_file"].get().strip() or f"urls_{name}.json",
+            "site_url": self.form_vars["site_url"].get().strip(),
             "track_lastmod": False,
             "skip_extensions": DEFAULT_SKIP_EXTENSIONS,
             "exclude_patterns": [],
@@ -797,7 +864,29 @@ STEP 4 — Add the service account to Google Search Console
   • Click "Add user" → paste the email → set role to "Owner" → Add
 
 STEP 5 — Done!
-  • In SmartInstantIndex, go to Sites → Browse → select your credentials.json""",
+  • In SmartInstantIndex, go to Sites → Browse → select your credentials.json
+
+─────────────────────────────────────────
+OPTIONAL — Enable "Sync from GSC" feature
+─────────────────────────────────────────
+This feature checks which URLs are actually indexed in Google Search Console
+and marks them automatically. It requires one extra step:
+
+1. In Google Cloud Console, enable the "Google Search Console API"
+   (it is separate from the "Web Search Indexing API").
+
+2. In SmartInstantIndex → Sites, fill in the "GSC Property URL" field.
+   The value must match exactly how your site appears in Search Console:
+
+   • Domain property  →  sc-domain:example.com
+     (use this if you verified via DNS — most common)
+
+   • URL prefix property  →  https://example.com/
+     (use this if you verified by uploading an HTML file or meta tag)
+
+   To check your property type: open Search Console, look at the
+   property list on the left — domain properties show a globe icon,
+   URL prefix properties show a link icon.""",
         ),
         (
             "③ Dashboard",
@@ -830,6 +919,10 @@ The URLs panel shows every URL found in your sitemap and its status.
 • Green ✓ — URL has been submitted to Google.
 • Gray  ✗ — URL is pending (will be submitted on next run).
 
+• GSC Sync column — ✓ means Google confirmed this URL is indexed
+  (visible in Search Console data). — means not yet synced or not found.
+  Use the "Sync from GSC" button to update this column.
+
 • Search box — Type any text to filter the list instantly.
 
 • Reset selected — Select one or more rows (use Ctrl+click or
@@ -837,7 +930,11 @@ The URLs panel shows every URL found in your sitemap and its status.
   pending. They will be resubmitted on the next run.
 
 • Reset all — Marks ALL URLs as pending. Use this if you want to
-  force Google to re-index everything from scratch.""",
+  force Google to re-index everything from scratch.
+
+• Sync from GSC — Fetches all indexed pages from Google Search Console
+  and marks matching URLs as indexed. Requires "GSC Property URL" to be
+  set in Sites. See the Setup tab for configuration details.""",
         ),
         (
             "⑤ Settings",
@@ -916,7 +1013,29 @@ PASO 4 — Añadir la cuenta de servicio a Google Search Console
   • Haz clic en "Añadir usuario" → pega el email → rol "Propietario" → Añadir
 
 PASO 5 — ¡Listo!
-  • En SmartInstantIndex, ve a Sites → Browse → selecciona tu credentials.json""",
+  • En SmartInstantIndex, ve a Sites → Browse → selecciona tu credentials.json
+
+─────────────────────────────────────────
+OPCIONAL — Activar "Sync from GSC"
+─────────────────────────────────────────
+Esta función consulta qué URLs están indexadas en Google Search Console
+y las marca automáticamente. Requiere un paso adicional:
+
+1. En Google Cloud Console, activa la API "Google Search Console API"
+   (es distinta a la "Web Search Indexing API").
+
+2. En SmartInstantIndex → Sites, rellena el campo "GSC Property URL".
+   El valor debe coincidir exactamente con cómo aparece tu sitio en Search Console:
+
+   • Propiedad de dominio  →  sc-domain:ejemplo.com
+     (úsala si verificaste por DNS — lo más habitual)
+
+   • Propiedad de prefijo de URL  →  https://ejemplo.com/
+     (úsala si verificaste con un archivo HTML o meta tag)
+
+   Para saber qué tipo tienes: abre Search Console y mira la lista de
+   propiedades a la izquierda — las de dominio tienen un icono de globo,
+   las de prefijo de URL tienen un icono de enlace.""",
         ),
         (
             "③ Dashboard",
@@ -949,6 +1068,11 @@ El panel de URLs muestra todas las URLs de tu sitemap y su estado.
 • Verde ✓ — URL enviada a Google.
 • Gris  ✗ — URL pendiente (se enviará en el próximo run).
 
+• Columna GSC Sync — ✓ significa que Google confirma que esta URL está
+  indexada (aparece en los datos de Search Console). — significa que aún
+  no se ha sincronizado o no se encontró.
+  Usa el botón "Sync from GSC" para actualizar esta columna.
+
 • Buscador — Escribe cualquier texto para filtrar la lista al instante.
 
 • Reset selected — Selecciona una o varias filas (usa Ctrl+clic o
@@ -956,7 +1080,11 @@ El panel de URLs muestra todas las URLs de tu sitemap y su estado.
   marcarlas como pendientes. Se reenviarán en el próximo run.
 
 • Reset all — Marca TODAS las URLs como pendientes. Úsalo si quieres
-  forzar a Google a re-indexar todo desde cero.""",
+  forzar a Google a re-indexar todo desde cero.
+
+• Sync from GSC — Obtiene todas las páginas indexadas de Google Search
+  Console y marca las URLs coincidentes como indexadas. Requiere que
+  "GSC Property URL" esté configurado en Sites. Ver pestaña Configuración.""",
         ),
         (
             "⑤ Settings",

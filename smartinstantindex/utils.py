@@ -58,6 +58,7 @@ def normalize_config(config):
         site.setdefault("skip_extensions", DEFAULT_SKIP_EXTENSIONS)
         site.setdefault("exclude_patterns", [])
         site.setdefault("include_patterns", [])
+        site.setdefault("site_url", "")   # GSC property identifier; empty = GSC disabled
 
     return config
 
