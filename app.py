@@ -348,8 +348,9 @@ class URLsScreen(ctk.CTkFrame):
             row=0, column=2, padx=(0, 10), sticky="ew"
         )
 
-        ctk.CTkButton(top, text="Reset selected", width=110, command=self._reset_selected).grid(row=0, column=3, padx=(0, 6))
-        ctk.CTkButton(top, text="Reset all", width=90, command=self._reset_all).grid(row=0, column=4, padx=(0, 10))
+        ctk.CTkButton(top, text="Mark indexed", width=110, command=self._mark_selected_indexed).grid(row=0, column=3, padx=(0, 6))
+        ctk.CTkButton(top, text="Reset selected", width=110, command=self._reset_selected).grid(row=0, column=4, padx=(0, 6))
+        ctk.CTkButton(top, text="Reset all", width=90, command=self._reset_all).grid(row=0, column=5, padx=(0, 10))
 
         # Treeview with scrollbar
         tree_frame = tk.Frame(self)
@@ -429,6 +430,19 @@ class URLsScreen(ctk.CTkFrame):
     def _get_site(self):
         config = get_config()
         return next((s for s in config.get("sites", []) if s["name"] == self.site_var.get()), None)
+
+    def _mark_selected_indexed(self):
+        selected = self.tree.selection()
+        if not selected:
+            return
+        site = self._get_site()
+        if not site:
+            return
+        for url in selected:
+            if url in self._all_urls:
+                self._all_urls[url]["indexed"] = True
+        save_urls_to_file(self._all_urls, data_path(site["urls_file"]))
+        self._filter_table()
 
     def _reset_selected(self):
         selected = self.tree.selection()
