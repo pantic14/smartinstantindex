@@ -1,0 +1,15 @@
+{
+    "sites": [
+        {
+            "name": "my-site",
+            "sitemap_url": "https://example.com/sitemap.xml",
+            "credentials": "credentials.json",
+            "urls_file": "urls_my-site.json",
+            "site_url": "sc-domain:example.com",
+            "track_lastmod": false,
+            "skip_extensions": [".jpg", ".jpeg", ".png", ".gif", ".webp", ".svg", ".pdf", ".mp4", ".zip"],
+            "exclude_patterns": [],
+            "include_patterns": []
+        }
+    ]
+}
