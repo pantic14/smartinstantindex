@@ -740,6 +740,7 @@ class SettingsScreen(ctk.CTkFrame):
         super().__init__(parent, corner_radius=0)
         self.app = app
         self.grid_columnconfigure(0, weight=1)
+        self.grid_rowconfigure(2, weight=1)
 
         ctk.CTkLabel(self, text="Settings", font=ctk.CTkFont(size=20, weight="bold")).grid(
             row=0, column=0, padx=30, pady=(20, 10), sticky="w"
@@ -754,7 +755,7 @@ class SettingsScreen(ctk.CTkFrame):
         self.site_dropdown.pack(side="left")
 
         form = ctk.CTkScrollableFrame(self)
-        form.grid(row=2, column=0, padx=30, pady=10, sticky="ew")
+        form.grid(row=2, column=0, padx=30, pady=10, sticky="nsew")
         form.grid_columnconfigure(1, weight=1)
 
         ctk.CTkLabel(form, text="Track lastmod").grid(row=0, column=0, padx=10, pady=8, sticky="w")
@@ -875,7 +876,11 @@ This feature checks which URLs are actually indexed in Google Search Console
 and marks them automatically. It requires one extra step:
 
 1. In Google Cloud Console, enable the "Google Search Console API"
-   (it is separate from the "Web Search Indexing API").
+   (same steps as STEP 2 above, but search for "Google Search Console API"):
+   • In the search bar type "Google Search Console API"
+   • Check that your project appears in the square at the top left.
+     If not, click on it and select it.
+   • Click on it → click "ENABLE"
 
 2. In SmartInstantIndex → Sites, fill in the "GSC Property URL" field.
    The value must match exactly how your site appears in Search Console:
@@ -1024,7 +1029,11 @@ Esta función consulta qué URLs están indexadas en Google Search Console
 y las marca automáticamente. Requiere un paso adicional:
 
 1. En Google Cloud Console, activa la API "Google Search Console API"
-   (es distinta a la "Web Search Indexing API").
+   (igual que el PASO 2 de arriba, pero buscando "Google Search Console API"):
+   • En el buscador escribe "Google Search Console API"
+   • Comprueba que tu proyecto aparece en el cuadrado de arriba a la izquierda.
+     Si no, haz clic en él y selecciónalo.
+   • Haz clic en ella → haz clic en "HABILITAR"
 
 2. En SmartInstantIndex → Sites, rellena el campo "GSC Property URL".
    El valor debe coincidir exactamente con cómo aparece tu sitio en Search Console:
@@ -1165,7 +1174,33 @@ Vous avez besoin d'un compte de service Google pour utiliser l'Indexing API.
   • "Ajouter un utilisateur" → collez l'email → rôle "Propriétaire" → Ajouter
 
 ÉTAPE 5 — Terminé !
-  • Dans SmartInstantIndex, allez dans Sites → Browse → sélectionnez credentials.json""",
+  • Dans SmartInstantIndex, allez dans Sites → Browse → sélectionnez credentials.json
+
+─────────────────────────────────────────
+OPTIONNEL — Activer "Sync from GSC"
+─────────────────────────────────────────
+Cette fonction vérifie quelles URLs sont réellement indexées dans Google Search Console
+et les marque automatiquement. Elle nécessite une étape supplémentaire :
+
+1. Dans Google Cloud Console, activez l'API "Google Search Console API"
+   (mêmes étapes que l'ÉTAPE 2 ci-dessus, mais en recherchant "Google Search Console API") :
+   • Dans la barre de recherche, tapez "Google Search Console API"
+   • Vérifiez que votre projet apparaît dans le carré en haut à gauche.
+     Si ce n'est pas le cas, cliquez dessus et sélectionnez-le.
+   • Cliquez dessus → cliquez sur "ACTIVER"
+
+2. Dans SmartInstantIndex → Sites, remplissez le champ "GSC Property URL".
+   La valeur doit correspondre exactement à l'affichage de votre site dans Search Console :
+
+   • Propriété de domaine  →  sc-domain:exemple.com
+     (si vous avez vérifié via DNS — le plus courant)
+
+   • Propriété par préfixe d'URL  →  https://exemple.com/
+     (si vous avez vérifié avec un fichier HTML ou une balise meta)
+
+   Pour vérifier votre type : ouvrez Search Console et regardez la liste des
+   propriétés à gauche — les propriétés de domaine ont une icône de globe,
+   les propriétés par préfixe d'URL ont une icône de lien.""",
         ),
         (
             "③ Dashboard",
@@ -1284,7 +1319,33 @@ PASSO 4 — Adicionar a conta de serviço ao Google Search Console
   • "Adicionar utilizador" → cole o email → função "Proprietário" → Adicionar
 
 PASSO 5 — Concluído!
-  • No SmartInstantIndex, vá a Sites → Browse → selecione credentials.json""",
+  • No SmartInstantIndex, vá a Sites → Browse → selecione credentials.json
+
+─────────────────────────────────────────
+OPCIONAL — Ativar "Sync from GSC"
+─────────────────────────────────────────
+Esta função verifica quais URLs estão realmente indexadas no Google Search Console
+e marca-as automaticamente. Requer um passo adicional:
+
+1. No Google Cloud Console, ative a API "Google Search Console API"
+   (os mesmos passos do PASSO 2 acima, mas pesquisando "Google Search Console API"):
+   • Na barra de pesquisa escreva "Google Search Console API"
+   • Verifique que o seu projeto aparece no quadrado no canto superior esquerdo.
+     Se não aparecer, clique nele e selecione-o.
+   • Clique nela → clique em "ATIVAR"
+
+2. No SmartInstantIndex → Sites, preencha o campo "GSC Property URL".
+   O valor deve corresponder exatamente a como o seu site aparece no Search Console:
+
+   • Propriedade de domínio  →  sc-domain:exemplo.com
+     (use se verificou via DNS — o mais comum)
+
+   • Propriedade de prefixo de URL  →  https://exemplo.com/
+     (use se verificou com um ficheiro HTML ou meta tag)
+
+   Para verificar o seu tipo: abra o Search Console e veja a lista de
+   propriedades à esquerda — as de domínio têm um ícone de globo,
+   as de prefixo de URL têm um ícone de ligação.""",
         ),
         (
             "③ Dashboard",
@@ -1403,7 +1464,33 @@ SCHRITT 4 — Dienstkonto zur Google Search Console hinzufügen
   • "Nutzer hinzufügen" → E-Mail einfügen → Rolle "Inhaber" → Hinzufügen
 
 SCHRITT 5 — Fertig!
-  • Gehen Sie in SmartInstantIndex zu Sites → Browse → wählen Sie credentials.json""",
+  • Gehen Sie in SmartInstantIndex zu Sites → Browse → wählen Sie credentials.json
+
+─────────────────────────────────────────
+OPTIONAL — "Sync from GSC" aktivieren
+─────────────────────────────────────────
+Diese Funktion prüft, welche URLs tatsächlich in der Google Search Console indexiert sind,
+und markiert sie automatisch. Sie erfordert einen zusätzlichen Schritt:
+
+1. Aktivieren Sie im Google Cloud Console die API "Google Search Console API"
+   (dieselben Schritte wie in SCHRITT 2, aber suchen Sie nach "Google Search Console API"):
+   • Geben Sie in der Suchleiste "Google Search Console API" ein
+   • Prüfen Sie, ob Ihr Projekt im Quadrat oben links angezeigt wird.
+     Falls nicht, klicken Sie darauf und wählen Sie es aus.
+   • Klicken Sie darauf → klicken Sie auf "AKTIVIEREN"
+
+2. Füllen Sie in SmartInstantIndex → Sites das Feld "GSC Property URL" aus.
+   Der Wert muss genau der Anzeige Ihrer Website in der Search Console entsprechen:
+
+   • Domain-Property  →  sc-domain:beispiel.com
+     (verwenden Sie dies, wenn Sie per DNS verifiziert haben — am häufigsten)
+
+   • URL-Präfix-Property  →  https://beispiel.com/
+     (verwenden Sie dies, wenn Sie per HTML-Datei oder Meta-Tag verifiziert haben)
+
+   Typ prüfen: Öffnen Sie die Search Console und sehen Sie sich die Property-Liste
+   links an — Domain-Properties haben ein Globus-Symbol,
+   URL-Präfix-Properties haben ein Link-Symbol.""",
         ),
         (
             "③ Dashboard",
