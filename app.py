@@ -297,6 +297,7 @@ class DashboardScreen(ctk.CTkFrame):
                     result = index_url(url, creds_path, i)
                     if result:
                         existing_urls[url]["indexed"] = True
+                        existing_urls[url]["indexed_at"] = str(date.today())
                         indexed_count += 1
                         self._log(f"[{i}] OK: {url}")
                 except Exception as e:
@@ -348,9 +349,16 @@ class URLsScreen(ctk.CTkFrame):
             row=0, column=2, padx=(0, 10), sticky="ew"
         )
 
-        ctk.CTkButton(top, text="Mark indexed", width=110, command=self._mark_selected_indexed).grid(row=0, column=3, padx=(0, 6))
-        ctk.CTkButton(top, text="Reset selected", width=110, command=self._reset_selected).grid(row=0, column=4, padx=(0, 6))
-        ctk.CTkButton(top, text="Reset all", width=90, command=self._reset_all).grid(row=0, column=5, padx=(0, 10))
+        self._fetch_btn = ctk.CTkButton(top, text="Fetch URLs", width=100, command=self._fetch_urls)
+        self._fetch_btn.grid(row=0, column=3, padx=(0, 6))
+        ctk.CTkButton(top, text="Mark indexed", width=110, command=self._mark_selected_indexed).grid(row=0, column=4, padx=(0, 6))
+        ctk.CTkButton(top, text="Reset selected", width=110, command=self._reset_selected).grid(row=0, column=5, padx=(0, 6))
+        ctk.CTkButton(top, text="Reset all", width=90, command=self._reset_all).grid(row=0, column=6, padx=(0, 10))
+
+        self._fetch_status = ctk.StringVar()
+        ctk.CTkLabel(top, textvariable=self._fetch_status, font=ctk.CTkFont(size=11), text_color="#aaaaaa").grid(
+            row=1, column=0, columnspan=7, padx=10, pady=(0, 6), sticky="w"
+        )
 
         # Treeview with scrollbar
         tree_frame = tk.Frame(self)
@@ -369,16 +377,18 @@ class URLsScreen(ctk.CTkFrame):
 
         self.tree = ttk.Treeview(
             tree_frame,
-            columns=("url", "status", "lastmod"),
+            columns=("url", "status", "lastmod", "submitted"),
             show="headings",
             selectmode="extended",
         )
         self.tree.heading("url", text="URL")
         self.tree.heading("status", text="Status")
         self.tree.heading("lastmod", text="lastmod")
+        self.tree.heading("submitted", text="Submitted")
         self.tree.column("url", stretch=True, minwidth=200)
         self.tree.column("status", width=80, anchor="center", stretch=False)
         self.tree.column("lastmod", width=130, anchor="center", stretch=False)
+        self.tree.column("submitted", width=130, anchor="center", stretch=False)
 
         vsb = ttk.Scrollbar(tree_frame, orient="vertical", command=self.tree.yview)
         self.tree.configure(yscrollcommand=vsb.set)
@@ -425,7 +435,55 @@ class URLsScreen(ctk.CTkFrame):
                 continue
             status = "✓" if entry["indexed"] else "✗"
             tag = "indexed" if entry["indexed"] else "pending"
-            self.tree.insert("", "end", iid=url, values=(url, status, entry.get("lastmod") or "—"), tags=(tag,))
+            self.tree.insert("", "end", iid=url, values=(url, status, entry.get("lastmod") or "—", entry.get("indexed_at") or "—"), tags=(tag,))
+
+    def _fetch_urls(self):
+        site = self._get_site()
+        if not site:
+            return
+        self._fetch_btn.configure(state="disabled")
+        self._fetch_status.set("Fetching URLs from sitemap…")
+
+        def worker():
+            try:
+                sitemap_urls = fetch_urls_from_sitemap_recursive(site["sitemap_url"], set())
+                sitemap_urls = filter_urls(sitemap_urls, site)
+                existing = migrate_urls(load_json(data_path(site["urls_file"])))
+
+                new_count = 0
+                for url in sitemap_urls:
+                    if url not in existing:
+                        new_count += 1
+                        existing[url] = {"indexed": False, "lastmod": sitemap_urls[url]}
+
+                del_count = 0
+                for url in list(existing):
+                    if url not in sitemap_urls:
+                        del_count += 1
+                        del existing[url]
+
+                if site.get("track_lastmod"):
+                    for url, entry in existing.items():
+                        new_lastmod = sitemap_urls.get(url)
+                        if new_lastmod and new_lastmod != entry.get("lastmod"):
+                            entry["indexed"] = False
+                            entry["lastmod"] = new_lastmod
+
+                save_urls_to_file(existing, data_path(site["urls_file"]))
+                msg = f"Done: {len(existing)} URLs ({new_count} new, {del_count} removed)"
+                self.after(0, lambda: self._finish_fetch(existing, msg))
+            except Exception as e:
+                self.after(0, lambda: self._finish_fetch(None, f"Error: {e}"))
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _finish_fetch(self, urls, msg):
+        self._fetch_btn.configure(state="normal")
+        self._fetch_status.set(msg)
+        if urls is not None:
+            self._all_urls = urls
+            self._loaded_site = self.site_var.get()
+            self._filter_table()
 
     def _get_site(self):
         config = get_config()
@@ -441,6 +499,7 @@ class URLsScreen(ctk.CTkFrame):
         for url in selected:
             if url in self._all_urls:
                 self._all_urls[url]["indexed"] = True
+                self._all_urls[url]["indexed_at"] = str(date.today())
         save_urls_to_file(self._all_urls, data_path(site["urls_file"]))
         self._filter_table()
 
@@ -719,14 +778,16 @@ STEP 1 — Create a Google Cloud Project
 
 STEP 2 — Enable the Web Search Indexing API
   • In the search bar type "Web Search Indexing API"
+  • Check that the project you just created appears in the square at the top left.
+    If not, click on it and select it.
   • Click on it → click "ENABLE"
 
 STEP 3 — Create a Service Account
-  • Go to IAM & Admin → Service Accounts → "+ Create Service Account"
+  • Click the menu → Go to IAM & Admin → Service Accounts → "+ Create Service Account"
   • Enter any name → click "Create and Continue" → "Done"
   • Click the service account you just created
   • Go to the "Keys" tab → "Add Key" → "Create new key" → JSON → "Create"
-  • A .json file will be downloaded. Rename it to credentials.json and
+  • A .json file will be downloaded. Rename it to credentials_[yourproject].json and
     place it in the same folder as the app (SmartInstantIndex.exe)
 
 STEP 4 — Add the service account to Google Search Console
@@ -836,20 +897,22 @@ PASO 1 — Crear un proyecto en Google Cloud
 
 PASO 2 — Activar la Web Search Indexing API
   • En el buscador escribe "Web Search Indexing API"
+  • Comprueba que en el cuadrado de arriba a la izquierda aparece el proyecto
+    que acabas de crear. Si no es así, haz clic en él y selecciónalo.
   • Haz clic en ella → haz clic en "HABILITAR"
 
 PASO 3 — Crear una cuenta de servicio
-  • Ve a IAM y administración → Cuentas de servicio → "+ Crear cuenta de servicio"
+  • Pulsa en el menú → Ve a IAM y administración → Cuentas de servicio → "+ Crear cuenta de servicio"
   • Escribe cualquier nombre → "Crear y continuar" → "Listo"
   • Haz clic en la cuenta recién creada
   • Pestaña "Claves" → "Agregar clave" → "Crear clave nueva" → JSON → "Crear"
-  • Se descargará un archivo .json. Renómbralo como credentials.json y
+  • Se descargará un archivo .json. Renómbralo como credentials_[tuproyecto].json y
     colócalo en la misma carpeta que la app (SmartInstantIndex.exe)
 
 PASO 4 — Añadir la cuenta de servicio a Google Search Console
   • Copia el email de la cuenta de servicio (ej: nombre@proyecto.iam.gserviceaccount.com)
   • Ve a https://search.google.com/search-console
-  • Selecciona tu propiedad → Configuración → Usuarios y permisos
+  • Selecciona tu propiedad → Ajustes → Usuarios y permisos
   • Haz clic en "Añadir usuario" → pega el email → rol "Propietario" → Añadir
 
 PASO 5 — ¡Listo!
@@ -953,14 +1016,16 @@ Vous avez besoin d'un compte de service Google pour utiliser l'Indexing API.
 
 ÉTAPE 2 — Activer l'API Web Search Indexing
   • Dans la barre de recherche, tapez "Web Search Indexing API"
+  • Vérifiez que le projet que vous venez de créer apparaît dans le carré en haut à gauche.
+    Si ce n'est pas le cas, cliquez dessus et sélectionnez-le.
   • Cliquez dessus → cliquez sur "ACTIVER"
 
 ÉTAPE 3 — Créer un compte de service
-  • Allez dans IAM et administration → Comptes de service → "+ Créer"
+  • Cliquez sur le menu → Allez dans IAM et administration → Comptes de service → "+ Créer"
   • Entrez un nom → "Créer et continuer" → "OK"
   • Cliquez sur le compte créé → onglet "Clés"
   • "Ajouter une clé" → "Créer une clé" → JSON → "Créer"
-  • Un fichier .json sera téléchargé. Renommez-le credentials.json et
+  • Un fichier .json sera téléchargé. Renommez-le credentials_[votreprojet].json et
     placez-le dans le même dossier que l'application (SmartInstantIndex.exe)
 
 ÉTAPE 4 — Ajouter le compte de service à Google Search Console
@@ -1070,14 +1135,16 @@ PASSO 1 — Criar um projeto no Google Cloud
 
 PASSO 2 — Ativar a Web Search Indexing API
   • Na barra de pesquisa escreva "Web Search Indexing API"
+  • Verifique que o projeto que acabou de criar aparece no quadrado no canto superior esquerdo.
+    Se não aparecer, clique nele e selecione-o.
   • Clique nela → clique em "ATIVAR"
 
 PASSO 3 — Criar uma conta de serviço
-  • Vá a IAM e administração → Contas de serviço → "+ Criar conta de serviço"
+  • Clique no menu → Vá a IAM e administração → Contas de serviço → "+ Criar conta de serviço"
   • Introduza um nome → "Criar e continuar" → "Concluído"
   • Clique na conta criada → separador "Chaves"
   • "Adicionar chave" → "Criar nova chave" → JSON → "Criar"
-  • Um ficheiro .json será descarregado. Renomeie-o para credentials.json e
+  • Um ficheiro .json será descarregado. Renomeie-o para credentials_[seuprojeto].json e
     coloque-o na mesma pasta da aplicação (SmartInstantIndex.exe)
 
 PASSO 4 — Adicionar a conta de serviço ao Google Search Console
@@ -1187,14 +1254,16 @@ SCHRITT 1 — Google Cloud-Projekt erstellen
 
 SCHRITT 2 — Web Search Indexing API aktivieren
   • Geben Sie in der Suchleiste "Web Search Indexing API" ein
+  • Prüfen Sie, ob das soeben erstellte Projekt im Quadrat oben links angezeigt wird.
+    Falls nicht, klicken Sie darauf und wählen Sie es aus.
   • Klicken Sie darauf → klicken Sie auf "AKTIVIEREN"
 
 SCHRITT 3 — Dienstkonto erstellen
-  • Gehen Sie zu IAM & Verwaltung → Dienstkonten → "+ Erstellen"
+  • Klicken Sie auf das Menü → Gehen Sie zu IAM & Verwaltung → Dienstkonten → "+ Erstellen"
   • Geben Sie einen Namen ein → "Erstellen und fortfahren" → "Fertig"
   • Klicken Sie auf das erstellte Konto → Registerkarte "Schlüssel"
   • "Schlüssel hinzufügen" → "Neuen Schlüssel erstellen" → JSON → "Erstellen"
-  • Eine .json-Datei wird heruntergeladen. Benennen Sie sie in credentials.json um
+  • Eine .json-Datei wird heruntergeladen. Benennen Sie sie in credentials_[ihrprojekt].json um
     und legen Sie sie in den gleichen Ordner wie die App (SmartInstantIndex.exe)
 
 SCHRITT 4 — Dienstkonto zur Google Search Console hinzufügen
@@ -1303,10 +1372,10 @@ class HelpScreen(ctk.CTkFrame):
             command=lambda _: self._render(),
         ).pack(side="left")
 
-        # Scrollable content
-        self.scroll = ctk.CTkScrollableFrame(self)
-        self.scroll.grid(row=2, column=0, padx=30, pady=(5, 20), sticky="nsew")
-        self.scroll.grid_columnconfigure(0, weight=1)
+        # Single text area — one scrollbar, no nested scrollbars
+        self.textbox = ctk.CTkTextbox(self, wrap="word")
+        self.textbox.grid(row=2, column=0, padx=30, pady=(5, 20), sticky="nsew")
+        self.textbox._textbox.tag_config("title", font=("", 13, "bold"), spacing1=14, spacing3=4)
 
         self._render()
 
@@ -1314,28 +1383,19 @@ class HelpScreen(ctk.CTkFrame):
         pass  # content is static, no reload needed
 
     def _render(self):
-        for w in self.scroll.winfo_children():
-            w.destroy()
+        self.textbox.configure(state="normal")
+        self.textbox.delete("1.0", "end")
 
         lang = self.lang_var.get()
         sections = HELP_CONTENT.get(lang, HELP_CONTENT["English"])
 
         for i, (title, text) in enumerate(sections):
-            ctk.CTkLabel(
-                self.scroll, text=title,
-                font=ctk.CTkFont(size=14, weight="bold"),
-                anchor="w",
-            ).grid(row=i * 2, column=0, sticky="ew", padx=10, pady=(16, 2))
+            if i > 0:
+                self.textbox.insert("end", "\n")
+            self.textbox._textbox.insert("end", title + "\n", "title")
+            self.textbox.insert("end", text + "\n")
 
-            tb = ctk.CTkTextbox(self.scroll, height=self._text_height(text), wrap="word")
-            tb.insert("1.0", text)
-            tb.configure(state="disabled")
-            tb.grid(row=i * 2 + 1, column=0, sticky="ew", padx=10, pady=(0, 4))
-
-    @staticmethod
-    def _text_height(text):
-        lines = text.count("\n") + 1
-        return min(max(lines * 20, 80), 400)
+        self.textbox.configure(state="disabled")
 
 
 # ─── Entry point ─────────────────────────────────────────────────────────────
