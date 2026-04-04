@@ -416,12 +416,12 @@ class URLsScreen(ctk.CTkFrame):
         self._gsc_running = False
 
     def on_show(self):
+        self._loaded_site = None  # always reload on tab switch
         config = get_config()
         names = [s["name"] for s in config.get("sites", [])]
         self.site_dropdown.configure(values=names)
         if names and self.site_var.get() not in names:
             self.site_var.set(names[0])
-            self._loaded_site = None  # force reload on site change
         self._load_urls()
 
     def _load_urls(self):
