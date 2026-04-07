@@ -21,6 +21,7 @@ os.chdir(DATA_DIR)
 from smartinstantindex.utils import (
     load_json, save_urls_to_file, normalize_config,
     migrate_urls, filter_urls, update_quota_batch, DEFAULT_SKIP_EXTENSIONS,
+    build_indexing_plan,
 )
 from smartinstantindex.sitemaps import fetch_urls_from_sitemap_recursive
 from smartinstantindex.indexing import index_url
@@ -145,9 +146,9 @@ class DashboardScreen(ctk.CTkFrame):
         # Stats
         stats_frame = ctk.CTkFrame(self)
         stats_frame.grid(row=2, column=0, padx=30, pady=10, sticky="ew")
-        stats_frame.grid_columnconfigure((0, 1, 2, 3), weight=1)
+        stats_frame.grid_columnconfigure((0, 1, 2), weight=1)
         self.stat_labels = {}
-        for col, key in enumerate(["Total URLs", "Indexed", "Pending", "Quota left"]):
+        for col, key in enumerate(["Total URLs", "Indexed", "Pending"]):
             f = ctk.CTkFrame(stats_frame)
             f.grid(row=0, column=col, padx=10, pady=10, sticky="ew")
             ctk.CTkLabel(f, text=key, font=ctk.CTkFont(size=12)).pack(pady=(8, 0))
@@ -155,9 +156,20 @@ class DashboardScreen(ctk.CTkFrame):
             lbl.pack(pady=(0, 8))
             self.stat_labels[key] = lbl
 
+        # Daily quota section (per-credential progress bars)
+        quota_section = ctk.CTkFrame(self)
+        quota_section.grid(row=3, column=0, padx=30, pady=(0, 5), sticky="ew")
+        quota_section.grid_columnconfigure(0, weight=1)
+        ctk.CTkLabel(quota_section, text="Daily Quota",
+                     font=ctk.CTkFont(size=13, weight="bold")).grid(
+            row=0, column=0, padx=10, pady=(8, 4), sticky="w")
+        self.quota_bars_frame = ctk.CTkFrame(quota_section, fg_color="transparent")
+        self.quota_bars_frame.grid(row=1, column=0, padx=10, pady=(0, 8), sticky="ew")
+        self.quota_bars_frame.grid_columnconfigure(1, weight=1)
+
         # Run button + progress
         action_frame = ctk.CTkFrame(self)
-        action_frame.grid(row=3, column=0, padx=30, pady=5, sticky="ew")
+        action_frame.grid(row=4, column=0, padx=30, pady=5, sticky="ew")
         self.run_btn = ctk.CTkButton(action_frame, text="Run Indexing", command=self._run)
         self.run_btn.pack(side="left", padx=10, pady=10)
         self.progress = ctk.CTkProgressBar(action_frame)
@@ -166,11 +178,11 @@ class DashboardScreen(ctk.CTkFrame):
 
         # Log area
         ctk.CTkLabel(self, text="Log", font=ctk.CTkFont(size=13, weight="bold")).grid(
-            row=4, column=0, padx=30, pady=(10, 0), sticky="w"
+            row=5, column=0, padx=30, pady=(10, 0), sticky="w"
         )
-        self.grid_rowconfigure(5, weight=1)
+        self.grid_rowconfigure(6, weight=1)
         self.log_box = ctk.CTkTextbox(self, state="disabled")
-        self.log_box.grid(row=5, column=0, padx=30, pady=(5, 20), sticky="nsew")
+        self.log_box.grid(row=6, column=0, padx=30, pady=(5, 20), sticky="nsew")
 
     def on_show(self):
         # Single config read for both methods
@@ -196,6 +208,7 @@ class DashboardScreen(ctk.CTkFrame):
         if not site:
             for lbl in self.stat_labels.values():
                 lbl.configure(text="—")
+            self._rebuild_quota_bars([])
             return
 
         urls = migrate_urls(load_json(data_path(site["urls_file"])))
@@ -203,15 +216,28 @@ class DashboardScreen(ctk.CTkFrame):
         indexed = sum(1 for e in urls.values() if e["indexed"])
         pending = total - indexed
 
-        quota = load_json(QUOTA_FILE)
-        entry = quota.get(site["credentials"], {})
-        used = entry.get("used", 0) if entry.get("date") == str(date.today()) else 0
-        quota_left = max(0, 200 - used)
-
         self.stat_labels["Total URLs"].configure(text=str(total))
         self.stat_labels["Indexed"].configure(text=str(indexed))
         self.stat_labels["Pending"].configure(text=str(pending))
-        self.stat_labels["Quota left"].configure(text=str(quota_left))
+        self._rebuild_quota_bars(site["credentials"])
+
+    def _rebuild_quota_bars(self, credentials_list):
+        for w in self.quota_bars_frame.winfo_children():
+            w.destroy()
+        today = str(date.today())
+        quota_data = load_json(QUOTA_FILE)
+        for row_idx, creds_file in enumerate(credentials_list):
+            entry = quota_data.get(creds_file, {})
+            used = entry.get("used", 0) if entry.get("date") == today else 0
+            ctk.CTkLabel(self.quota_bars_frame, text=creds_file,
+                         font=ctk.CTkFont(size=11), anchor="w").grid(
+                row=row_idx, column=0, padx=(0, 8), pady=3, sticky="w")
+            bar = ctk.CTkProgressBar(self.quota_bars_frame)
+            bar.grid(row=row_idx, column=1, padx=(0, 8), pady=3, sticky="ew")
+            bar.set(used / 200)
+            ctk.CTkLabel(self.quota_bars_frame, text=f"{used}/200",
+                         font=ctk.CTkFont(size=11), width=70, anchor="e").grid(
+                row=row_idx, column=2, pady=3, sticky="e")
 
     def _log(self, msg):
         self.log_box.configure(state="normal")
@@ -242,10 +268,11 @@ class DashboardScreen(ctk.CTkFrame):
                 self._log(f"Site '{site_name}' not found.")
                 return
 
-            creds_path = data_path(site["credentials"])
-            if not os.path.exists(creds_path):
-                self._log(f"ERROR: credentials file not found: {creds_path}")
-                return
+            for creds_name in site["credentials"]:
+                creds_path = data_path(creds_name)
+                if not os.path.exists(creds_path):
+                    self._log(f"ERROR: credentials file not found: {creds_path}")
+                    return
 
             self._log(f"Fetching sitemap: {site['sitemap_url']}")
             try:
@@ -287,29 +314,54 @@ class DashboardScreen(ctk.CTkFrame):
             # Save state after diff (before indexing loop)
             save_urls_to_file(existing_urls, data_path(site["urls_file"]))
 
-            pending = [url for url, e in existing_urls.items() if not e["indexed"]][:200]
-            self._log(f"Pending to index: {len(pending)}")
+            plan = build_indexing_plan(site["credentials"])
+            total_capacity = sum(cap for _, cap in plan)
+            pending = [url for url, e in existing_urls.items() if not e["indexed"]]
+            urls_to_index = pending[:total_capacity]
+            plan_summary = ", ".join(f"{c}={cap}" for c, cap in plan)
+            self._log(f"Pending to index: {len(urls_to_index)} (capacity: {total_capacity} — {plan_summary})")
 
-            indexed_count = 0
-            total_pending = len(pending)
-            for i, url in enumerate(pending, 1):
-                self.after(0, self.progress.set, i / total_pending if total_pending else 1)
-                try:
-                    result = index_url(url, creds_path, i)
-                    if result:
-                        existing_urls[url]["indexed"] = True
-                        existing_urls[url]["indexed_at"] = str(date.today())
-                        indexed_count += 1
-                        self._log(f"[{i}] OK: {url}")
-                except Exception as e:
-                    existing_urls[url]["indexed"] = False
-                    self._log(f"[{i}] ERROR: {e}")
+            indexed_tally = {}
+            url_cursor = 0
+            global_i = 1
+            total_to_index = len(urls_to_index)
+            error_occurred = False
+
+            for creds_name, capacity in plan:
+                if error_occurred:
                     break
+                batch = urls_to_index[url_cursor: url_cursor + capacity]
+                if not batch:
+                    break
+                creds_path = data_path(creds_name)
+                batch_indexed = 0
+                for url in batch:
+                    self.after(0, self.progress.set,
+                               global_i / total_to_index if total_to_index else 1)
+                    try:
+                        result = index_url(url, creds_path, global_i)
+                        if result:
+                            existing_urls[url]["indexed"] = True
+                            existing_urls[url]["indexed_at"] = str(date.today())
+                            batch_indexed += 1
+                            self._log(f"[{global_i}] OK: {url}")
+                            global_i += 1
+                    except Exception as e:
+                        existing_urls[url]["indexed"] = False
+                        self._log(f"[{global_i}] ERROR ({creds_name}): {e}")
+                        if "Rate limit" in str(e) or "429" in str(e):
+                            # Quota exhausted on this credential — save progress and try next
+                            self._log(f"Quota exhausted for {creds_name}, switching to next credential.")
+                        else:
+                            error_occurred = True
+                        break
+                url_cursor += batch_indexed  # advance by actually indexed count so next credential retries from here
+                indexed_tally[creds_name] = batch_indexed
 
-            # Single save and single quota write at the end of the run
             save_urls_to_file(existing_urls, data_path(site["urls_file"]))
-            if indexed_count:
-                update_quota_batch(site["credentials"], indexed_count)
+            for creds_name, count in indexed_tally.items():
+                if count:
+                    update_quota_batch(creds_name, count)
 
             self._log("Done.")
             self.after(0, self._refresh_stats)
@@ -563,7 +615,7 @@ class URLsScreen(ctk.CTkFrame):
         threading.Thread(target=self._run_gsc_sync, args=(site,), daemon=True).start()
 
     def _run_gsc_sync(self, site):
-        creds_path = data_path(site["credentials"])
+        creds_path = data_path(site["credentials"][0])
         site_url = site["site_url"]
         today = str(date.today())
         try:
@@ -631,13 +683,16 @@ class SitesScreen(ctk.CTkFrame):
             row=4, column=2, padx=(0, 10), sticky="w"
         )
 
-        ctk.CTkLabel(form, text="Credentials").grid(row=5, column=0, padx=10, pady=4, sticky="e")
-        self.form_vars["credentials"] = ctk.StringVar()
-        ctk.CTkEntry(form, textvariable=self.form_vars["credentials"]).grid(
-            row=5, column=1, padx=10, pady=4, sticky="ew"
-        )
-        ctk.CTkButton(form, text="Browse", width=70,
-                      command=self._pick_credentials).grid(row=5, column=2, padx=(0, 10))
+        ctk.CTkLabel(form, text="Credentials").grid(row=5, column=0, padx=10, pady=4, sticky="ne")
+        creds_container = ctk.CTkFrame(form, fg_color="transparent")
+        creds_container.grid(row=5, column=1, columnspan=2, padx=10, pady=4, sticky="ew")
+        creds_container.grid_columnconfigure(0, weight=1)
+        self._creds_list_frame = ctk.CTkScrollableFrame(creds_container, height=80)
+        self._creds_list_frame.grid(row=0, column=0, sticky="ew")
+        self._creds_list_frame.grid_columnconfigure(0, weight=1)
+        ctk.CTkButton(creds_container, text="+ Add credentials", width=140,
+                      command=self._add_credentials).grid(row=1, column=0, pady=(4, 0), sticky="w")
+        self._creds_list = []
 
         btn_frame = ctk.CTkFrame(form)
         btn_frame.grid(row=6, column=0, columnspan=3, pady=10)
@@ -657,27 +712,52 @@ class SitesScreen(ctk.CTkFrame):
             row = ctk.CTkFrame(self.scroll)
             row.grid(row=i, column=0, sticky="ew", pady=3)
             row.grid_columnconfigure(0, weight=1)
-            ctk.CTkLabel(row, text=f"{site['name']}  —  {site['sitemap_url']}", anchor="w").grid(
-                row=0, column=0, padx=10, sticky="w"
-            )
+            capacity = len(site["credentials"]) * 200
+            ctk.CTkLabel(row,
+                         text=f"{site['name']}  —  {site['sitemap_url']}  —  {capacity} urls/día",
+                         anchor="w").grid(row=0, column=0, padx=10, sticky="w")
             ctk.CTkButton(row, text="Edit", width=60,
                           command=lambda idx=i: self._edit_site(idx)).grid(row=0, column=1, padx=4)
             ctk.CTkButton(row, text="Delete", width=60, fg_color="red", hover_color="#a00000",
                           command=lambda idx=i: self._delete_site(idx)).grid(row=0, column=2, padx=4)
 
-    def _pick_credentials(self):
+    def _render_creds_list(self):
+        for w in self._creds_list_frame.winfo_children():
+            w.destroy()
+        for idx, creds_file in enumerate(self._creds_list):
+            row = ctk.CTkFrame(self._creds_list_frame, fg_color="transparent")
+            row.grid(row=idx, column=0, sticky="ew", pady=1)
+            row.grid_columnconfigure(0, weight=1)
+            ctk.CTkLabel(row, text=creds_file, anchor="w").grid(
+                row=0, column=0, padx=(4, 8), sticky="w")
+            ctk.CTkButton(row, text="Remove", width=70,
+                          fg_color="gray30", hover_color="gray20",
+                          command=lambda i=idx: self._remove_credentials(i)).grid(
+                row=0, column=1, padx=(0, 4))
+
+    def _add_credentials(self):
         path = filedialog.askopenfilename(
-            title="Select credentials.json",
+            title="Select credentials JSON",
             filetypes=[("JSON files", "*.json"), ("All files", "*.*")],
             initialdir=DATA_DIR,
         )
         if path:
-            self.form_vars["credentials"].set(os.path.relpath(path, DATA_DIR))
+            rel = os.path.relpath(path, DATA_DIR)
+            if rel not in self._creds_list:
+                self._creds_list.append(rel)
+                self._render_creds_list()
+
+    def _remove_credentials(self, idx):
+        if 0 <= idx < len(self._creds_list):
+            del self._creds_list[idx]
+            self._render_creds_list()
 
     def _clear_form(self):
         self._editing_index = None
         for var in self.form_vars.values():
             var.set("")
+        self._creds_list = []
+        self._render_creds_list()
 
     def _edit_site(self, idx):
         config = get_config()
@@ -685,9 +765,10 @@ class SitesScreen(ctk.CTkFrame):
         self._editing_index = idx
         self.form_vars["name"].set(site.get("name", ""))
         self.form_vars["sitemap_url"].set(site.get("sitemap_url", ""))
-        self.form_vars["credentials"].set(site.get("credentials", "credentials.json"))
         self.form_vars["urls_file"].set(site.get("urls_file", ""))
         self.form_vars["site_url"].set(site.get("site_url", ""))
+        self._creds_list = list(site.get("credentials", ["credentials.json"]))
+        self._render_creds_list()
 
     def _delete_site(self, idx):
         config = get_config()
@@ -710,7 +791,7 @@ class SitesScreen(ctk.CTkFrame):
         site_data = {
             "name": name,
             "sitemap_url": sitemap_url,
-            "credentials": self.form_vars["credentials"].get().strip() or "credentials.json",
+            "credentials": self._creds_list if self._creds_list else ["credentials.json"],
             "urls_file": self.form_vars["urls_file"].get().strip() or f"urls_{name}.json",
             "site_url": self.form_vars["site_url"].get().strip(),
             "track_lastmod": False,
@@ -970,6 +1051,51 @@ Settings are per-site. Select the site first using the dropdown.
 
 Click "Save settings" to apply changes.""",
         ),
+        (
+            "⑥ Multiplying Daily Quota",
+            """\
+Google's 200 URLs/day limit is per GCP project, not per service account.
+By assigning multiple credentials (from different GCP projects) to a site,
+SmartInstantIndex automatically rotates to the next credential when the
+current one hits its daily limit.
+
+Example: 3 credentials → 600 URLs/day for the same site.
+
+HOW TO SET IT UP
+
+For each additional GCP project you want to add:
+
+STEP 1 — Create a new GCP project
+  • Go to https://console.cloud.google.com
+  • Click the project selector → "New Project"
+  • Give it a name and click "Create"
+
+STEP 2 — Enable the Web Search Indexing API
+  • In the search bar type "Web Search Indexing API"
+  • Make sure the new project is selected in the top-left square
+  • Click it → "ENABLE"
+
+STEP 3 — Create a Service Account and download its key
+  • Menu → IAM & Admin → Service Accounts → "+ Create Service Account"
+  • Enter any name → "Create and Continue" → "Done"
+  • Click the account → "Keys" tab → "Add Key" → JSON → "Create"
+  • Save the downloaded .json file next to the app
+
+STEP 4 — Add the service account to Google Search Console
+  • Copy the service account email
+  • Go to Search Console → your property → Settings → Users and permissions
+  • "Add user" → paste the email → role "Owner" → Add
+  • You can add multiple service accounts to the same property
+
+STEP 5 — Assign the credentials in SmartInstantIndex
+  • Go to Sites → Edit your site
+  • Click "+ Add credentials" and select the new .json file
+  • Repeat for each additional credentials file
+  • Click "Save"
+
+The Dashboard shows a progress bar per credential so you can see
+how much quota each one has used today.""",
+        ),
     ],
     "Español": [
         (
@@ -1124,6 +1250,51 @@ La configuración es por site. Selecciona primero el site con el desplegable.
 
 Haz clic en "Save settings" para aplicar los cambios.""",
         ),
+        (
+            "⑥ Multiplicar la cuota diaria",
+            """\
+El límite de 200 URLs/día es por proyecto de GCP, no por cuenta de servicio.
+Asignando varias credenciales (de proyectos GCP distintos) a un mismo site,
+SmartInstantIndex pasa automáticamente a la siguiente cuando la actual agota
+su cuota diaria.
+
+Ejemplo: 3 credenciales → 600 URLs/día para el mismo site.
+
+CÓMO CONFIGURARLO
+
+Repite estos pasos por cada proyecto GCP adicional que quieras añadir:
+
+PASO 1 — Crea un nuevo proyecto en GCP
+  • Ve a https://console.cloud.google.com
+  • Haz clic en el selector de proyectos → "Nuevo proyecto"
+  • Ponle un nombre y haz clic en "Crear"
+
+PASO 2 — Activa la Web Search Indexing API
+  • En el buscador escribe "Web Search Indexing API"
+  • Comprueba que el nuevo proyecto aparece en el cuadrado de arriba a la izquierda
+  • Haz clic en ella → "HABILITAR"
+
+PASO 3 — Crea una cuenta de servicio y descarga su clave
+  • Menú → IAM y administración → Cuentas de servicio → "+ Crear cuenta de servicio"
+  • Escribe cualquier nombre → "Crear y continuar" → "Listo"
+  • Haz clic en la cuenta → pestaña "Claves" → "Agregar clave" → JSON → "Crear"
+  • Guarda el archivo .json descargado junto a la app
+
+PASO 4 — Añade la cuenta de servicio a Google Search Console
+  • Copia el email de la cuenta de servicio
+  • Ve a Search Console → tu propiedad → Ajustes → Usuarios y permisos
+  • "Añadir usuario" → pega el email → rol "Propietario" → Añadir
+  • Puedes añadir varias cuentas de servicio a la misma propiedad
+
+PASO 5 — Asigna las credenciales en SmartInstantIndex
+  • Ve a Sites → edita tu site
+  • Haz clic en "+ Add credentials" y selecciona el nuevo archivo .json
+  • Repite por cada archivo de credenciales adicional
+  • Haz clic en "Save"
+
+El Dashboard muestra una barra de progreso por credencial para que veas
+cuánta cuota ha consumido cada una hoy.""",
+        ),
     ],
     "Français": [
         (
@@ -1268,6 +1439,51 @@ Les paramètres sont par site. Sélectionnez d'abord le site dans la liste.
     Note : Exclude a toujours priorité sur Include.
 
 Cliquez sur "Save settings" pour appliquer les modifications.""",
+        ),
+        (
+            "⑥ Multiplier le quota journalier",
+            """\
+La limite de 200 URLs/jour est par projet GCP, pas par compte de service.
+En assignant plusieurs identifiants (issus de projets GCP différents) à un
+site, SmartInstantIndex passe automatiquement au suivant lorsque le quota
+du premier est épuisé.
+
+Exemple : 3 identifiants → 600 URLs/jour pour le même site.
+
+COMMENT CONFIGURER
+
+Répétez ces étapes pour chaque projet GCP supplémentaire :
+
+ÉTAPE 1 — Créer un nouveau projet GCP
+  • Rendez-vous sur https://console.cloud.google.com
+  • Cliquez sur le sélecteur de projet → "Nouveau projet"
+  • Donnez-lui un nom et cliquez sur "Créer"
+
+ÉTAPE 2 — Activer l'API Web Search Indexing
+  • Dans la barre de recherche, tapez "Web Search Indexing API"
+  • Vérifiez que le nouveau projet est sélectionné en haut à gauche
+  • Cliquez dessus → "ACTIVER"
+
+ÉTAPE 3 — Créer un compte de service et télécharger sa clé
+  • Menu → IAM et administration → Comptes de service → "+ Créer"
+  • Entrez un nom → "Créer et continuer" → "OK"
+  • Cliquez sur le compte → onglet "Clés" → "Ajouter une clé" → JSON → "Créer"
+  • Enregistrez le fichier .json téléchargé dans le dossier de l'application
+
+ÉTAPE 4 — Ajouter le compte de service à Google Search Console
+  • Copiez l'email du compte de service
+  • Allez dans Search Console → votre propriété → Paramètres → Utilisateurs
+  • "Ajouter un utilisateur" → collez l'email → rôle "Propriétaire" → Ajouter
+  • Vous pouvez ajouter plusieurs comptes de service à la même propriété
+
+ÉTAPE 5 — Assigner les identifiants dans SmartInstantIndex
+  • Allez dans Sites → modifiez votre site
+  • Cliquez sur "+ Add credentials" et sélectionnez le nouveau fichier .json
+  • Répétez pour chaque fichier d'identifiants supplémentaire
+  • Cliquez sur "Save"
+
+Le Dashboard affiche une barre de progression par identifiant pour voir
+le quota utilisé par chacun aujourd'hui.""",
         ),
     ],
     "Português": [
@@ -1414,6 +1630,51 @@ As definições são por site. Selecione primeiro o site na lista.
 
 Clique em "Save settings" para aplicar as alterações.""",
         ),
+        (
+            "⑥ Multiplicar a quota diária",
+            """\
+O limite de 200 URLs/dia é por projeto GCP, não por conta de serviço.
+Ao atribuir várias credenciais (de projetos GCP diferentes) a um site,
+o SmartInstantIndex passa automaticamente para a seguinte quando a atual
+esgota a sua quota diária.
+
+Exemplo: 3 credenciais → 600 URLs/dia para o mesmo site.
+
+COMO CONFIGURAR
+
+Repita estes passos para cada projeto GCP adicional:
+
+PASSO 1 — Criar um novo projeto GCP
+  • Aceda a https://console.cloud.google.com
+  • Clique no seletor de projeto → "Novo projeto"
+  • Dê-lhe um nome e clique em "Criar"
+
+PASSO 2 — Ativar a Web Search Indexing API
+  • Na barra de pesquisa escreva "Web Search Indexing API"
+  • Verifique que o novo projeto está selecionado no canto superior esquerdo
+  • Clique nela → "ATIVAR"
+
+PASSO 3 — Criar uma conta de serviço e transferir a chave
+  • Menu → IAM e administração → Contas de serviço → "+ Criar conta de serviço"
+  • Introduza um nome → "Criar e continuar" → "Concluído"
+  • Clique na conta → separador "Chaves" → "Adicionar chave" → JSON → "Criar"
+  • Guarde o ficheiro .json transferido na pasta da aplicação
+
+PASSO 4 — Adicionar a conta de serviço ao Google Search Console
+  • Copie o email da conta de serviço
+  • Vá ao Search Console → a sua propriedade → Definições → Utilizadores
+  • "Adicionar utilizador" → cole o email → função "Proprietário" → Adicionar
+  • Pode adicionar várias contas de serviço à mesma propriedade
+
+PASSO 5 — Atribuir as credenciais no SmartInstantIndex
+  • Vá a Sites → edite o seu site
+  • Clique em "+ Add credentials" e selecione o novo ficheiro .json
+  • Repita para cada ficheiro de credenciais adicional
+  • Clique em "Save"
+
+O Dashboard mostra uma barra de progresso por credencial para ver
+a quota utilizada por cada uma hoje.""",
+        ),
     ],
     "Deutsch": [
         (
@@ -1558,6 +1819,51 @@ Einstellungen gelten pro Website. Wählen Sie zuerst die Website aus.
     Hinweis: Exclude hat immer Vorrang vor Include.
 
 Klicken Sie auf "Save settings", um die Änderungen zu übernehmen.""",
+        ),
+        (
+            "⑥ Tageslimit erhöhen",
+            """\
+Das Limit von 200 URLs/Tag gilt pro GCP-Projekt, nicht pro Dienstkonto.
+Durch Zuweisung mehrerer Zugangsdaten (aus verschiedenen GCP-Projekten)
+wechselt SmartInstantIndex automatisch zum nächsten, wenn das aktuelle
+sein Tageslimit erreicht hat.
+
+Beispiel: 3 Zugangsdateien → 600 URLs/Tag für dieselbe Website.
+
+EINRICHTUNG
+
+Wiederholen Sie diese Schritte für jedes zusätzliche GCP-Projekt:
+
+SCHRITT 1 — Neues GCP-Projekt erstellen
+  • Gehen Sie zu https://console.cloud.google.com
+  • Klicken Sie auf die Projektauswahl → "Neues Projekt"
+  • Geben Sie einen Namen ein und klicken Sie auf "Erstellen"
+
+SCHRITT 2 — Web Search Indexing API aktivieren
+  • Geben Sie in der Suchleiste "Web Search Indexing API" ein
+  • Stellen Sie sicher, dass das neue Projekt oben links ausgewählt ist
+  • Klicken Sie darauf → "AKTIVIEREN"
+
+SCHRITT 3 — Dienstkonto erstellen und Schlüssel herunterladen
+  • Menü → IAM & Verwaltung → Dienstkonten → "+ Erstellen"
+  • Namen eingeben → "Erstellen und fortfahren" → "Fertig"
+  • Konto anklicken → "Schlüssel" → "Schlüssel hinzufügen" → JSON → "Erstellen"
+  • Die heruntergeladene .json-Datei in den App-Ordner legen
+
+SCHRITT 4 — Dienstkonto zur Google Search Console hinzufügen
+  • E-Mail des Dienstkontos kopieren
+  • Search Console → Ihre Property → Einstellungen → Nutzer und Berechtigungen
+  • "Nutzer hinzufügen" → E-Mail einfügen → Rolle "Inhaber" → Hinzufügen
+  • Sie können mehrere Dienstkonten zur selben Property hinzufügen
+
+SCHRITT 5 — Zugangsdaten in SmartInstantIndex zuweisen
+  • Gehen Sie zu Sites → bearbeiten Sie Ihre Website
+  • Klicken Sie auf "+ Add credentials" und wählen Sie die neue .json-Datei
+  • Wiederholen Sie dies für jede weitere Zugangsdatei
+  • Klicken Sie auf "Save"
+
+Das Dashboard zeigt für jede Zugangsdatei einen Fortschrittsbalken,
+der das heute verbrauchte Kontingent anzeigt.""",
         ),
     ],
 }

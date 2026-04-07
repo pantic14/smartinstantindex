@@ -52,7 +52,10 @@ def normalize_config(config):
         }
 
     for site in config.get("sites", []):
-        site.setdefault("credentials", "credentials.json")
+        creds = site.get("credentials", "credentials.json")
+        if isinstance(creds, str):
+            creds = [creds]
+        site["credentials"] = creds
         site.setdefault("urls_file", f"urls_{site['name']}.json")
         site.setdefault("track_lastmod", False)
         site.setdefault("skip_extensions", DEFAULT_SKIP_EXTENSIONS)
@@ -119,3 +122,23 @@ def update_quota_batch(credentials_file, count):
 
     with open(quota_path, "w") as f:
         json.dump(quota, f, indent=4)
+
+
+QUOTA_LIMIT = 200
+
+
+def get_quota_remaining(credentials_file):
+    """Return how many URL submissions remain today for a given credentials file."""
+    quota = load_json("quota.json")
+    entry = quota.get(credentials_file, {})
+    used = entry.get("used", 0) if entry.get("date") == str(date.today()) else 0
+    return max(0, QUOTA_LIMIT - used)
+
+
+def build_indexing_plan(credentials_list):
+    """Return [(creds_file, remaining)] for credentials with quota > 0 today."""
+    return [
+        (creds, get_quota_remaining(creds))
+        for creds in credentials_list
+        if get_quota_remaining(creds) > 0
+    ]

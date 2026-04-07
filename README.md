@@ -107,6 +107,22 @@ Produces `dist/SmartInstantIndex.exe` (Windows) or `dist/SmartInstantIndex` (Mac
 
 The 200 URLs/day limit is **per GCP project**, not per service account. Two service accounts under the same project share the same quota.
 
+## Multiplying daily quota with multiple credentials
+
+Each GCP project has its own independent 200 URLs/day quota. You can assign multiple service account credentials (from **different GCP projects**) to a single site. SmartInstantIndex will automatically rotate to the next credential when the current one hits its daily limit.
+
+**Example:** 3 credentials → 600 URLs/day for the same site.
+
+### How to set it up
+
+1. **Create additional GCP projects** — each project gets its own independent 200 URLs/day quota.
+2. **Enable the Indexing API** in each new project.
+3. **Create a Service Account** in each project and download its JSON key.
+4. **Add each service account email to Google Search Console** as an Owner of your property. You can add multiple service accounts to the same property.
+5. **Assign the credentials to your site** — in the GUI, go to Sites → Edit your site → click "+ Add credentials" for each JSON key file.
+
+The app will index URLs using the first credential until its quota is exhausted for the day, then automatically continue with the next one. Quota resets daily.
+
 ## Data files
 
 | File | Purpose |

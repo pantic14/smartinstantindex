@@ -25,9 +25,10 @@ def fetch_urls_from_sitemap(sitemap_url):
 ALL_URLS = {}
 
 
-def fetch_urls_from_sitemap_recursive(sitemap_url, visited_sitemaps=set()):
+def fetch_urls_from_sitemap_recursive(sitemap_url, visited_sitemaps=None):
     global ALL_URLS
-    if not visited_sitemaps:
+    if visited_sitemaps is None:
+        visited_sitemaps = set()
         ALL_URLS = {}
 
     visited_sitemaps.add(sitemap_url)
