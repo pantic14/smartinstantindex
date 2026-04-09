@@ -1,9 +1,9 @@
-import requests
+from curl_cffi import requests
 from bs4 import BeautifulSoup
 
 
 def fetch_urls_from_sitemap(sitemap_url):
-    response = requests.get(sitemap_url)
+    response = requests.get(sitemap_url, impersonate="chrome")
     if response.status_code == 200:
         soup = BeautifulSoup(response.text, features="xml")
         urls = {}
