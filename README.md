@@ -4,7 +4,7 @@ Submit your website URLs to Google Search in minutes, not weeks.
 
 SmartInstantIndex uses the Google Indexing API to notify Google of new or updated pages directly, bypassing the normal crawl queue. It reads URLs from your XML sitemap, tracks which ones have been submitted, and respects Google's 200 URLs/day quota per GCP project.
 
-Available as a **desktop GUI** (Windows/Mac/Linux) or as a **CLI tool**.
+Available as a **local web app** (Windows/Mac/Linux) or as a **CLI tool**.
 
 [Download the latest release](../../releases/latest) · [Report an issue](../../issues)
 
@@ -15,47 +15,96 @@ Available as a **desktop GUI** (Windows/Mac/Linux) or as a **CLI tool**.
 - Indexes up to 200 URLs/day per Google Cloud Project
 - Reads URLs from XML sitemaps (including sitemap indexes)
 - Tracks indexing state — never re-submits already indexed URLs
-- Filters URLs by extension, exclude patterns, and include patterns (whitelist)
+- Filters URLs by extension, exclude patterns, and include patterns (whitelist) with regex support
 - Resets URLs automatically when `lastmod` changes in the sitemap
-- Multi-site support from a single `config.json`
-- Google Search Console integration — fetch which pages are actually indexed
-- Desktop GUI (CustomTkinter) with Dashboard, URLs, Sites, Settings, and Help screens
+- Multi-site support with multiple credentials per site
+- Google Search Console integration — sync which pages are confirmed as indexed
+- Multiply daily quota by assigning credentials from different GCP projects
+- Search across all URLs instantly
+- Runs as a local web app with a system tray icon — no browser extension or cloud account needed
 
-## Requirements
+---
 
-- Python 3.9+
-- A Google Cloud Project with the Indexing API enabled
-- A Google Service Account with Owner access in Google Search Console
+## Quick start (no Python required)
 
-## Setup
+1. Download the binary for your OS from the [Releases page](../../releases/latest):
+   - `SmartInstantIndex-windows.exe`
+   - `SmartInstantIndex-macos`
+   - `SmartInstantIndex-linux`
 
-### 1. Install dependencies
+2. Run it. Your browser opens automatically at `http://localhost:7842`.
+
+3. A tray icon appears in your taskbar. Right-click it to reopen the app or quit.
+
+4. Go to **Settings** to upload your Google service account credentials, then **Sites** to add your first site.
+
+> The app stores all data (config, URL state, quota) in the same folder as the executable.
+
+---
+
+## Google credentials — step by step
+
+You need a Google service account to use the Indexing API.
+
+### Step 1 — Create a Google Cloud project
+
+Go to [console.cloud.google.com](https://console.cloud.google.com), click the project selector → **New Project**, give it a name and click **Create**.
+
+### Step 2 — Enable the Web Search Indexing API
+
+In the search bar type `Web Search Indexing API`, make sure your project is selected in the top-left, then click **ENABLE**.
+
+### Step 3 — Create a service account and download its key
+
+Menu → **IAM & Admin** → **Service Accounts** → **+ Create Service Account** → enter any name → **Create and Continue** → **Done**.
+
+Click the account you just created → **Keys** tab → **Add Key** → **Create new key** → JSON → **Create**.
+
+A `.json` file is downloaded — this is your credentials file.
+
+### Step 4 — Add the service account to Google Search Console
+
+Copy the service account email (e.g. `name@project.iam.gserviceaccount.com`).
+
+Go to [search.google.com/search-console](https://search.google.com/search-console), select your property → **Settings** → **Users and permissions** → **Add user** → paste the email → role **Owner** → Add.
+
+### Step 5 — Upload in SmartInstantIndex
+
+Go to **Settings** in the app → upload the JSON file. Then open your site → **Edit** → assign the credentials.
+
+---
+
+## Multiplying the daily quota
+
+Google's 200 URLs/day limit is **per GCP project**, not per service account. By assigning credentials from multiple different GCP projects to the same site, SmartInstantIndex automatically rotates to the next when the current one hits its daily limit.
+
+**Example:** 3 credentials from 3 different projects → 600 URLs/day for the same site.
+
+Repeat the steps above for each additional GCP project, upload each JSON file in Settings, and assign them all to your site.
+
+---
+
+## Sync with Google Search Console
+
+The **Sync from GSC** feature queries Google Search Console for all confirmed-indexed pages and marks matching URLs in the app. To use it:
+
+1. Enable the **Google Search Console API** in your GCP project (same steps as above, search for `Google Search Console API`).
+2. In your site settings, set the **Search Console Property URL**:
+   - Domain property → `sc-domain:example.com` (verified via DNS)
+   - URL-prefix property → `https://example.com/` (verified via HTML file or meta tag)
+
+---
+
+## CLI usage (Python required)
 
 ```shell
 pip install -r requirements.txt
+python index.py
 ```
 
-### 2. Create a Google Cloud Project and enable the Indexing API
+Runs one full indexing cycle for all sites in `config.json`. Useful for running SmartInstantIndex from a server or cron job.
 
-Visit [console.cloud.google.com/apis/api/indexing.googleapis.com](https://console.cloud.google.com/apis/api/indexing.googleapis.com) and click **ENABLE**.
-
-### 3. Create a Service Account
-
-Follow Google's guide: [prereqs#create-service-account](https://developers.google.com/search/apis/indexing-api/v3/prereqs#create-service-account)
-
-Download the JSON key and save it as `credentials.json` in the project folder.
-
-> **Security warning:** Never commit `credentials.json` to version control. It is already listed in `.gitignore`. See `credentials.example.json` for the expected file structure.
-
-### 4. Add the service account to Google Search Console
-
-Guide: [prereqs#verify-site](https://developers.google.com/search/apis/indexing-api/v3/prereqs#verify-site)
-
-Grant the service account the `Owner` role on your property.
-
-### 5. Configure `config.json`
-
-Copy `config.example.json` to `config.json` and fill in your site details:
+### config.json format
 
 ```json
 {
@@ -63,7 +112,7 @@ Copy `config.example.json` to `config.json` and fill in your site details:
         {
             "name": "my-site",
             "sitemap_url": "https://example.com/sitemap.xml",
-            "credentials": "credentials.json",
+            "credentials": ["credentials.json"],
             "urls_file": "urls_my-site.json",
             "site_url": "sc-domain:example.com",
             "track_lastmod": false,
@@ -75,64 +124,35 @@ Copy `config.example.json` to `config.json` and fill in your site details:
 }
 ```
 
-`site_url` must match exactly how the property appears in Google Search Console (e.g. `sc-domain:example.com` for domain properties).
-
-## Usage
-
-### Desktop GUI
-
-```shell
-python app.py
-```
-
-Or download the standalone binary from the [Releases page](../../releases/latest) — no Python required.
-
-### CLI
-
-```shell
-python index.py
-```
-
-Runs one full indexing cycle for all sites in `config.json`.
-
-### Build the executable
-
-```shell
-python build.py
-```
-
-Produces `dist/SmartInstantIndex.exe` (Windows) or `dist/SmartInstantIndex` (Mac/Linux).
-
-## Quota note
-
-The 200 URLs/day limit is **per GCP project**, not per service account. Two service accounts under the same project share the same quota.
-
-## Multiplying daily quota with multiple credentials
-
-Each GCP project has its own independent 200 URLs/day quota. You can assign multiple service account credentials (from **different GCP projects**) to a single site. SmartInstantIndex will automatically rotate to the next credential when the current one hits its daily limit.
-
-**Example:** 3 credentials → 600 URLs/day for the same site.
-
-### How to set it up
-
-1. **Create additional GCP projects** — each project gets its own independent 200 URLs/day quota.
-2. **Enable the Indexing API** in each new project.
-3. **Create a Service Account** in each project and download its JSON key.
-4. **Add each service account email to Google Search Console** as an Owner of your property. You can add multiple service accounts to the same property.
-5. **Assign the credentials to your site** — in the GUI, go to Sites → Edit your site → click "+ Add credentials" for each JSON key file.
-
-The app will index URLs using the first credential until its quota is exhausted for the day, then automatically continue with the next one. Quota resets daily.
-
-## Data files
+### Data files
 
 | File | Purpose |
 |------|---------|
 | `config.json` | Site configuration |
-| `credentials.json` | Google Service Account key (never commit this) |
+| `credentials.json` | Google Service Account key — never commit this |
 | `urls_{name}.json` | Per-site indexing state |
 | `quota.json` | Daily quota tracking |
 
-## Questions and Issues
+---
+
+## Running from source
+
+```shell
+pip install -r requirements.txt
+
+# Local web app
+python app_web.py
+
+# CLI only
+python index.py
+
+# Build standalone executable
+python build.py
+```
+
+---
+
+## Questions and issues
 
 Open a new issue on GitHub.
 
