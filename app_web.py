@@ -30,14 +30,21 @@ def open_browser():
 
 
 def run_server():
-    import uvicorn
-    from web_local.backend.routes import app
-    uvicorn.run(
-        app,
-        host="127.0.0.1",
-        port=PORT,
-        log_level="warning",
-    )
+    try:
+        import uvicorn
+        from web_local.backend.routes import app
+        uvicorn.run(
+            app,
+            host="127.0.0.1",
+            port=PORT,
+            log_level="warning",
+        )
+    except Exception as e:
+        import traceback
+        log_path = os.path.join(DATA_DIR, "smartindex_error.log")
+        with open(log_path, "w") as f:
+            f.write(traceback.format_exc())
+        raise
 
 
 def build_tray_icon():
