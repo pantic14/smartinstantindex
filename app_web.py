@@ -37,7 +37,7 @@ def run_server():
             app,
             host="127.0.0.1",
             port=PORT,
-            log_level="warning",
+            log_config=None,
         )
     except Exception as e:
         import traceback
