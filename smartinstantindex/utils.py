@@ -81,10 +81,16 @@ def migrate_urls(data):
 def _matches(pattern, url):
     """Match a pattern against a URL.
 
-    If the pattern looks like a regex (contains regex metacharacters beyond
-    plain path text), it is compiled and searched; otherwise a simple substring
-    check is used so existing plain-text patterns keep working.
+    Accepts both plain substrings and regular expressions.
+    JavaScript-style delimiters (/pattern/) are stripped automatically.
+    If the pattern contains regex metacharacters it is compiled and searched;
+    otherwise a simple substring check is used.
     """
+    # Strip JS-style regex delimiters: /pattern/ or /pattern/flags
+    if pattern.startswith("/") and pattern.rfind("/", 1) > 0:
+        end = pattern.rfind("/", 1)
+        pattern = pattern[1:end]  # discard delimiters and any flags
+
     _REGEX_CHARS = set(r"^$*+?{}[]|()")
     if any(c in pattern for c in _REGEX_CHARS):
         try:

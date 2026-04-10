@@ -12,8 +12,8 @@ for site in sites:
     APP_LOGGER.info(f"Processing site: {site['name']} — {site['sitemap_url']}")
 
     # Fetch and filter URLs from sitemap
-    sitemap_urls = fetch_urls_from_sitemap_recursive(site["sitemap_url"])
-    sitemap_urls = filter_urls(sitemap_urls, site)
+    raw_urls = fetch_urls_from_sitemap_recursive(site["sitemap_url"])
+    sitemap_urls = filter_urls(raw_urls, site)
     APP_LOGGER.info(f"Total URLs after filtering: {len(sitemap_urls)}")
 
     # Load and migrate existing state
@@ -26,10 +26,10 @@ for site in sites:
             NEW_URLS += 1
             existing_urls[url] = {"indexed": False, "lastmod": sitemap_urls[url]}
 
-    # Remove deleted URLs
+    # Remove URLs deleted from the sitemap (not just filtered out by patterns)
     DELETED_URLS = 0
     for url in list(existing_urls):
-        if url not in sitemap_urls:
+        if url not in raw_urls:
             DELETED_URLS += 1
             del existing_urls[url]
 
