@@ -17,6 +17,7 @@ eggs/
 lib/
 lib64/
 !web-local/frontend/src/lib/
+!web_local/frontend/src/lib/
 parts/
 sdist/
 var/
