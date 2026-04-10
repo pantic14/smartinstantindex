@@ -1,0 +1,19 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.backends.legacy:build"
+
+[project]
+name = "smartinstantindex"
+version = "1.0.0"
+description = "Submit website URLs to Google Search via the Indexing API"
+requires-python = ">=3.10"
+dependencies = [
+    "beautifulsoup4>=4.12",
+    "httplib2>=0.22",
+    "oauth2client>=4.1",
+    "curl_cffi",
+    "lxml>=5.2",
+]
+
+[tool.setuptools.packages.find]
+include = ["smartinstantindex*"]
