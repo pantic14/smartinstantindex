@@ -508,6 +508,6 @@ else:
     @app.get("/")
     def no_frontend():
         return JSONResponse(
-            {"error": "Frontend not built. Run: cd web-local/frontend && npm run build"},
+            {"error": "Frontend not built. Run: cd web_local/frontend && npm run build"},
             status_code=503,
         )

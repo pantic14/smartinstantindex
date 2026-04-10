@@ -15,8 +15,8 @@ if getattr(sys, "frozen", False):
     ICON_PATH = os.path.join(sys._MEIPASS, "android-chrome-192x192.png")  # type: ignore
 else:
     DATA_DIR = os.path.dirname(os.path.abspath(__file__))
-    STATIC_DIR = os.path.join(DATA_DIR, "web-local", "frontend", "dist")
-    ICON_PATH = os.path.join(DATA_DIR, "web-local", "frontend", "public", "android-chrome-192x192.png")
+    STATIC_DIR = os.path.join(DATA_DIR, "web_local", "frontend", "dist")
+    ICON_PATH = os.path.join(DATA_DIR, "web_local", "frontend", "public", "android-chrome-192x192.png")
 
 os.chdir(DATA_DIR)
 os.environ["SMARTINDEX_DATA_DIR"] = DATA_DIR
@@ -32,7 +32,7 @@ def open_browser():
 def run_server():
     import uvicorn
     uvicorn.run(
-        "web-local.backend.routes:app",
+        "web_local.backend.routes:app",
         host="127.0.0.1",
         port=PORT,
         log_level="warning",
