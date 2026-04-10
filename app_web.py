@@ -31,8 +31,9 @@ def open_browser():
 
 def run_server():
     import uvicorn
+    from web_local.backend.routes import app
     uvicorn.run(
-        "web_local.backend.routes:app",
+        app,
         host="127.0.0.1",
         port=PORT,
         log_level="warning",

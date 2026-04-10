@@ -16,6 +16,8 @@ subprocess.run([
     "--hidden-import", "uvicorn.protocols.websockets.auto",
     "--hidden-import", "uvicorn.loops.auto",
     "--hidden-import", "fastapi",
+    "--hidden-import", "web_local.backend.routes",
+    "--hidden-import", "web_local.backend",
     "--hidden-import", "pystray._win32",
     "--hidden-import", "pystray._darwin",
     "--hidden-import", "pystray._xorg",
