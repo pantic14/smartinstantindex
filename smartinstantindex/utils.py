@@ -2,6 +2,7 @@ import json
 import logging
 import logging.config
 import os
+import re
 from datetime import date
 
 
@@ -77,8 +78,27 @@ def migrate_urls(data):
     return migrated
 
 
+def _matches(pattern, url):
+    """Match a pattern against a URL.
+
+    If the pattern looks like a regex (contains regex metacharacters beyond
+    plain path text), it is compiled and searched; otherwise a simple substring
+    check is used so existing plain-text patterns keep working.
+    """
+    _REGEX_CHARS = set(r"^$*+?{}[]|()")
+    if any(c in pattern for c in _REGEX_CHARS):
+        try:
+            return bool(re.search(pattern, url))
+        except re.error:
+            return pattern in url  # fall back to substring on invalid regex
+    return pattern in url
+
+
 def filter_urls(urls, site_config):
-    """Filter URLs by extension, exclude_patterns, and include_patterns."""
+    """Filter URLs by extension, exclude_patterns, and include_patterns.
+
+    Patterns support both plain substrings and regular expressions.
+    """
     skip_extensions = [e.lower() for e in site_config.get("skip_extensions", DEFAULT_SKIP_EXTENSIONS)]
     exclude_patterns = site_config.get("exclude_patterns", [])
     include_patterns = site_config.get("include_patterns", [])
@@ -91,11 +111,11 @@ def filter_urls(urls, site_config):
             continue
 
         # Filter by exclude_patterns (exclusion wins)
-        if any(pattern in url for pattern in exclude_patterns):
+        if any(_matches(pattern, url) for pattern in exclude_patterns):
             continue
 
         # Filter by include_patterns (whitelist — only active if non-empty)
-        if include_patterns and not any(pattern in url for pattern in include_patterns):
+        if include_patterns and not any(_matches(pattern, url) for pattern in include_patterns):
             continue
 
         result[url] = lastmod
