@@ -161,9 +161,12 @@ def list_urls(name: str, filter: str = "all", page: int = 1, page_size: int = 10
         if url not in visible:
             continue
         indexed = data.get("indexed", False)
+        gsc_indexed = data.get("gsc_indexed", False)
         if filter == "pending" and indexed:
             continue
         if filter == "indexed" and not indexed:
+            continue
+        if filter == "gsc_indexed" and not gsc_indexed:
             continue
         items.append({
             "url": url,
@@ -315,6 +318,81 @@ def reset_urls(name: str, body: dict):
             existing[url].pop("indexed_at", None)
     save_urls_to_file(existing, str(urls_path(site)))
     return {"ok": True}
+
+
+# --- SSE: Run Selected URLs ---
+
+@app.post("/api/sites/{name}/run/selected/stream")
+def run_selected_stream(name: str, body: dict):
+    site = get_site(name)
+    urls_to_index = body.get("urls", [])
+    if not urls_to_index:
+        raise HTTPException(status_code=400, detail="No URLs provided")
+
+    def generate():
+        def send(event: dict) -> str:
+            return f"data: {json.dumps(event)}\n\n"
+
+        yield send({"type": "connected"})
+
+        try:
+            existing = load_urls(site)
+            today = str(date.today())
+
+            plan = build_indexing_plan(site["credentials"])
+            total_capacity = sum(cap for _, cap in plan)
+            # Only include URLs that exist in our data store
+            pending_urls = [u for u in urls_to_index if u in existing][:total_capacity]
+
+            yield send({"type": "plan", "pending": len(urls_to_index), "capacity": total_capacity})
+
+            if not plan or not pending_urls:
+                yield send({"type": "done", "indexed": 0, "pending": len(urls_to_index)})
+                return
+
+            global_i = 0
+            indexed_tally: dict[str, int] = {}
+            url_cursor = 0
+
+            for creds_file, capacity in plan:
+                batch = pending_urls[url_cursor: url_cursor + capacity]
+                if not batch:
+                    break
+                creds_full = str(creds_path(creds_file))
+                batch_indexed = 0
+
+                for url in batch:
+                    try:
+                        index_url(url, creds_full, global_i + 1)
+                        existing[url]["indexed"] = True
+                        existing[url]["indexed_at"] = today
+                        global_i += 1
+                        batch_indexed += 1
+                        indexed_tally[creds_file] = indexed_tally.get(creds_file, 0) + 1
+                        yield send({"type": "indexed", "url": url, "done": global_i, "total": len(pending_urls)})
+                    except Exception as e:
+                        msg = str(e)
+                        if "429" in msg or "quota" in msg.lower():
+                            yield send({"type": "quota_exhausted", "message": f"Quota exhausted for {creds_file}"})
+                            break
+                        else:
+                            yield send({"type": "error", "message": msg})
+                            save_urls_to_file(existing, str(urls_path(site)))
+                            return
+
+                url_cursor += batch_indexed
+
+            save_urls_to_file(existing, str(urls_path(site)))
+            for creds_file, count in indexed_tally.items():
+                if count:
+                    update_quota_batch(creds_file, count)
+
+            yield send({"type": "done", "indexed": global_i, "pending": len(urls_to_index) - global_i})
+
+        except Exception as e:
+            yield send({"type": "error", "message": str(e)})
+
+    return StreamingResponse(generate(), media_type="text/event-stream", headers={"Cache-Control": "no-cache"})
 
 
 # --- SSE: Run Indexing ---

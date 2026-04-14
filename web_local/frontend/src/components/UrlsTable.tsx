@@ -37,7 +37,7 @@ interface LogLine {
 }
 
 export default function UrlsTable({ site, navigate }: Props) {
-  const [filter, setFilter] = useState<"all" | "pending" | "indexed">("all");
+  const [filter, setFilter] = useState<"all" | "pending" | "indexed" | "gsc_indexed">("all");
   const [page, setPage] = useState(1);
   const pageSize = 100;
   const [data, setData] = useState<PageData | null>(null);
@@ -50,6 +50,11 @@ export default function UrlsTable({ site, navigate }: Props) {
   const [fetchStatus, setFetchStatus] = useState("");
   const [fetching, setFetching] = useState(false);
   const esRef = useRef<EventSource | null>(null);
+
+  // Run selected state
+  const [runLog, setRunLog] = useState<LogLine[]>([]);
+  const [running, setRunning] = useState(false);
+  const [runProgress, setRunProgress] = useState<{ done: number; total: number } | null>(null);
 
   async function load() {
     setLoading(true);
@@ -126,6 +131,61 @@ export default function UrlsTable({ site, navigate }: Props) {
     load();
   }
 
+  // Send selected URLs to the Google Indexing API
+  async function handleRunSelected() {
+    const urlsList = Array.from(selected);
+    setSelected(new Set());
+    setRunLog([]);
+    setRunProgress(null);
+    setRunning(true);
+
+    try {
+      const response = await api.runSelectedStream(site, urlsList);
+      if (!response.ok) {
+        setRunLog([{ type: "error", message: "Failed to start indexing" }]);
+        setRunning(false);
+        return;
+      }
+
+      const reader = response.body!.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const chunks = buffer.split("\n\n");
+        buffer = chunks.pop() ?? "";
+
+        for (const chunk of chunks) {
+          const dataLine = chunk.split("\n").find((l) => l.startsWith("data: "));
+          if (!dataLine) continue;
+          const ev: LogLine = JSON.parse(dataLine.slice(6));
+
+          if (ev.type === "indexed") {
+            setRunLog((l) => [...l, ev]);
+            setRunProgress({ done: ev.done!, total: ev.total! });
+            setData((prev) => prev
+              ? { ...prev, data: prev.data.map((r) => r.url === ev.url ? { ...r, indexed: true, indexed_at: String(new Date().toISOString().slice(0, 10)) } : r) }
+              : prev
+            );
+          } else {
+            setRunLog((l) => [...l, ev]);
+          }
+
+          if (ev.type === "done" || ev.type === "error") {
+            setRunning(false);
+            load();
+          }
+        }
+      }
+    } catch (e: any) {
+      setRunLog([{ type: "error", message: e.message }]);
+      setRunning(false);
+    }
+  }
+
   function toggleSelect(url: string) {
     setSelected((prev) => {
       const next = new Set(prev);
@@ -164,17 +224,22 @@ export default function UrlsTable({ site, navigate }: Props) {
       <div className="flex flex-wrap items-center gap-2 mb-4">
         {/* Filter */}
         <div className="flex rounded-md overflow-hidden border" style={{ borderColor: "var(--color-rim)" }}>
-          {(["all", "pending", "indexed"] as const).map((f) => (
+          {([
+            { value: "all", label: "All" },
+            { value: "pending", label: "Pending" },
+            { value: "indexed", label: "Submitted" },
+            { value: "gsc_indexed", label: "Indexed" },
+          ] as const).map((f) => (
             <button
-              key={f}
-              onClick={() => { setFilter(f); setPage(1); }}
-              className="px-3 py-1.5 text-sm capitalize"
+              key={f.value}
+              onClick={() => { setFilter(f.value); setPage(1); }}
+              className="px-3 py-1.5 text-sm"
               style={{
-                background: filter === f ? "var(--color-accent)" : "var(--color-navy-mid)",
-                color: filter === f ? "#fff" : "var(--color-muted)",
+                background: filter === f.value ? "var(--color-accent)" : "var(--color-navy-mid)",
+                color: filter === f.value ? "#fff" : "var(--color-muted)",
               }}
             >
-              {f}
+              {f.label}
             </button>
           ))}
         </div>
@@ -202,15 +267,25 @@ export default function UrlsTable({ site, navigate }: Props) {
         {selected.size > 0 && (
           <>
             <button
+              onClick={handleRunSelected}
+              disabled={running}
+              className="px-3 py-1.5 rounded-md text-sm disabled:opacity-50"
+              style={{ background: "var(--color-accent)", color: "#fff" }}
+            >
+              {running ? "Indexing…" : `Send to index (${selected.size})`}
+            </button>
+            <button
               onClick={handleMarkIndexed}
-              className="px-3 py-1.5 rounded-md text-sm"
+              disabled={running}
+              className="px-3 py-1.5 rounded-md text-sm disabled:opacity-50"
               style={{ background: "var(--color-success)", color: "#fff" }}
             >
               Mark indexed ({selected.size})
             </button>
             <button
               onClick={() => handleReset(false)}
-              className="px-3 py-1.5 rounded-md text-sm border"
+              disabled={running}
+              className="px-3 py-1.5 rounded-md text-sm border disabled:opacity-50"
               style={{ borderColor: "var(--color-warn)", color: "var(--color-warn)" }}
             >
               Reset ({selected.size})
@@ -255,6 +330,41 @@ export default function UrlsTable({ site, navigate }: Props) {
                 : l.message || l.type}
             </div>
           ))}
+        </div>
+      )}
+
+      {runLog.length > 0 && (
+        <div
+          className="mb-3 p-2 rounded-md text-xs font-mono space-y-0.5 max-h-32 overflow-y-auto"
+          style={{ background: "rgba(0,0,0,0.25)", border: "1px solid var(--color-rim)" }}
+        >
+          {runProgress && (
+            <div className="mb-1.5" style={{ color: "var(--color-muted)" }}>
+              {runProgress.done} / {runProgress.total} URLs
+            </div>
+          )}
+          {runLog.map((l, i) => (
+            <div
+              key={i}
+              style={{
+                color:
+                  l.type === "error"
+                    ? "var(--color-danger)"
+                    : l.type === "done"
+                    ? "var(--color-success)"
+                    : l.type === "indexed"
+                    ? "var(--color-muted)"
+                    : "var(--color-muted)",
+              }}
+            >
+              {l.type === "indexed"
+                ? `✓ ${l.url}`
+                : l.type === "done"
+                ? `Done — ${l.done ?? 0} sent`
+                : l.message || l.type}
+            </div>
+          ))}
+          {running && <div style={{ color: "var(--color-muted)", opacity: 0.5 }}>…</div>}
         </div>
       )}
 

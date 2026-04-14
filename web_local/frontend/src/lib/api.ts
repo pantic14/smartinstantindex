@@ -37,4 +37,12 @@ export const api = {
   // SSE URLs (opened by EventSource, not fetch)
   runStreamUrl: (name: string) => `${BASE}/api/sites/${name}/run/stream`,
   syncGscStreamUrl: (name: string) => `${BASE}/api/sites/${name}/sync-gsc/stream`,
+
+  // Run selected URLs via POST + fetch streaming
+  runSelectedStream: (name: string, urls: string[]) =>
+    fetch(`${BASE}/api/sites/${name}/run/selected/stream`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ urls }),
+    }),
 };
