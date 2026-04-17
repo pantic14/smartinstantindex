@@ -3,7 +3,11 @@ from bs4 import BeautifulSoup
 
 
 def fetch_urls_from_sitemap(sitemap_url):
-    response = requests.get(sitemap_url, impersonate="chrome")
+    response = None
+    for target in ("chrome120", "chrome"):
+        response = requests.get(sitemap_url, impersonate=target, timeout=20)
+        if response.status_code == 200:
+            break
     if response.status_code == 200:
         soup = BeautifulSoup(response.text, features="xml")
         urls = {}
