@@ -351,7 +351,6 @@ def run_selected_stream(name: str, body: dict):
                 return
 
             global_i = 0
-            indexed_tally: dict[str, int] = {}
             url_cursor = 0
 
             for creds_file, capacity in plan:
@@ -368,7 +367,8 @@ def run_selected_stream(name: str, body: dict):
                         existing[url]["indexed_at"] = today
                         global_i += 1
                         batch_indexed += 1
-                        indexed_tally[creds_file] = indexed_tally.get(creds_file, 0) + 1
+                        save_urls_to_file(existing, str(urls_path(site)))
+                        update_quota_batch(creds_file, 1)
                         yield send({"type": "indexed", "url": url, "done": global_i, "total": len(pending_urls)})
                     except Exception as e:
                         msg = str(e)
@@ -377,15 +377,9 @@ def run_selected_stream(name: str, body: dict):
                             break
                         else:
                             yield send({"type": "error", "message": msg})
-                            save_urls_to_file(existing, str(urls_path(site)))
                             return
 
                 url_cursor += batch_indexed
-
-            save_urls_to_file(existing, str(urls_path(site)))
-            for creds_file, count in indexed_tally.items():
-                if count:
-                    update_quota_batch(creds_file, count)
 
             yield send({"type": "done", "indexed": global_i, "pending": len(urls_to_index) - global_i})
 
@@ -441,7 +435,6 @@ def run_stream(name: str):
                 return
 
             global_i = 0
-            indexed_tally: dict[str, int] = {}
 
             for creds_file, capacity in plan:
                 if not pending_urls:
@@ -456,7 +449,8 @@ def run_stream(name: str):
                         existing[url]["indexed"] = True
                         existing[url]["indexed_at"] = today
                         global_i += 1
-                        indexed_tally[creds_file] = indexed_tally.get(creds_file, 0) + 1
+                        save_urls_to_file(existing, str(urls_path(site)))
+                        update_quota_batch(creds_file, 1)
                         yield send({"type": "indexed", "url": url, "done": global_i, "total": total_to_index})
                     except Exception as e:
                         msg = str(e)
@@ -465,13 +459,7 @@ def run_stream(name: str):
                             break
                         else:
                             yield send({"type": "error", "message": msg})
-                            save_urls_to_file(existing, str(urls_path(site)))
                             return
-
-            save_urls_to_file(existing, str(urls_path(site)))
-            for creds_file, count in indexed_tally.items():
-                if count:
-                    update_quota_batch(creds_file, count)
 
             final_pending = sum(1 for d in existing.values() if not d.get("indexed"))
             yield send({"type": "done", "indexed": global_i, "pending": final_pending})
