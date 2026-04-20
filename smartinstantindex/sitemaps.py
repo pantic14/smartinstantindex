@@ -1,3 +1,5 @@
+import os
+import urllib.parse
 from curl_cffi import requests
 from bs4 import BeautifulSoup
 
@@ -13,25 +15,43 @@ def _is_xml_response(text: str) -> bool:
     return t.startswith("<?xml") or t.startswith("<urlset") or t.startswith("<sitemapindex")
 
 
+def _fetch_via_scrapingant(sitemap_url: str) -> str | None:
+    api_key = os.environ.get("SCRAPINGANT_API_KEY")
+    if not api_key:
+        return None
+    params = {"url": sitemap_url, "x-api-key": api_key, "browser": "false"}
+    endpoint = "https://api.scrapingant.com/v2/general?" + urllib.parse.urlencode(params)
+    try:
+        r = requests.get(endpoint, timeout=30)
+        if r.status_code == 200 and _is_xml_response(r.text):
+            return r.text
+    except Exception:
+        pass
+    return None
+
+
 def fetch_urls_from_sitemap(sitemap_url):
-    response = None
+    content = None
     for target in _IMPERSONATE_TARGETS:
         try:
             r = requests.get(sitemap_url, impersonate=target, timeout=20)
             if r.status_code == 200 and _is_xml_response(r.text):
-                response = r
+                content = r.text
                 break
         except Exception:
             continue
-    if response is not None:
-        soup = BeautifulSoup(response.text, features="xml")
+
+    if content is None:
+        content = _fetch_via_scrapingant(sitemap_url)
+
+    if content:
+        soup = BeautifulSoup(content, features="xml")
         urls = {}
         for url_tag in soup.find_all("url"):
             loc = url_tag.find("loc")
             if loc:
                 lastmod = url_tag.find("lastmod")
                 urls[loc.text] = lastmod.text if lastmod else None
-        # Also handle sitemap index entries (sitemaploc entries have no <url> wrapper)
         for loc in soup.find_all("loc"):
             if loc.text not in urls:
                 urls[loc.text] = None
