@@ -2,13 +2,22 @@ from curl_cffi import requests
 from bs4 import BeautifulSoup
 
 
+_IMPERSONATE_TARGETS = (
+    "chrome136", "chrome131", "chrome124", "chrome120", "chrome110",
+    "firefox135", "safari184",
+)
+
+
 def fetch_urls_from_sitemap(sitemap_url):
     response = None
-    for target in ("chrome120", "chrome"):
-        response = requests.get(sitemap_url, impersonate=target, timeout=20)
-        if response.status_code == 200:
-            break
-    if response.status_code == 200:
+    for target in _IMPERSONATE_TARGETS:
+        try:
+            response = requests.get(sitemap_url, impersonate=target, timeout=20)
+            if response.status_code == 200:
+                break
+        except Exception:
+            continue
+    if response is not None and response.status_code == 200:
         soup = BeautifulSoup(response.text, features="xml")
         urls = {}
         for url_tag in soup.find_all("url"):
