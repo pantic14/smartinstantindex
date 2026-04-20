@@ -8,16 +8,22 @@ _IMPERSONATE_TARGETS = (
 )
 
 
+def _is_xml_response(text: str) -> bool:
+    t = text.lstrip()
+    return t.startswith("<?xml") or t.startswith("<urlset") or t.startswith("<sitemapindex")
+
+
 def fetch_urls_from_sitemap(sitemap_url):
     response = None
     for target in _IMPERSONATE_TARGETS:
         try:
-            response = requests.get(sitemap_url, impersonate=target, timeout=20)
-            if response.status_code == 200:
+            r = requests.get(sitemap_url, impersonate=target, timeout=20)
+            if r.status_code == 200 and _is_xml_response(r.text):
+                response = r
                 break
         except Exception:
             continue
-    if response is not None and response.status_code == 200:
+    if response is not None:
         soup = BeautifulSoup(response.text, features="xml")
         urls = {}
         for url_tag in soup.find_all("url"):
