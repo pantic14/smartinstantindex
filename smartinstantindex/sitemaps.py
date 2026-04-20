@@ -19,7 +19,7 @@ def _fetch_via_scrapingant(sitemap_url: str) -> str | None:
     api_key = os.environ.get("SCRAPINGANT_API_KEY")
     if not api_key:
         return None
-    params = {"url": sitemap_url, "x-api-key": api_key, "browser": "false"}
+    params = {"url": sitemap_url, "x-api-key": api_key, "browser": "true", "return_page_source": "true"}
     endpoint = "https://api.scrapingant.com/v2/general?" + urllib.parse.urlencode(params)
     try:
         r = requests.get(endpoint, timeout=30)
