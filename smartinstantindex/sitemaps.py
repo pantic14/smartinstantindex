@@ -30,7 +30,7 @@ def _fetch_via_scrapingant(sitemap_url: str) -> str | None:
     return None
 
 
-def fetch_urls_from_sitemap(sitemap_url):
+def fetch_urls_from_sitemap(sitemap_url, use_scrapingant=True):
     content = None
     for target in _IMPERSONATE_TARGETS:
         try:
@@ -41,7 +41,7 @@ def fetch_urls_from_sitemap(sitemap_url):
         except Exception:
             continue
 
-    if content is None:
+    if content is None and use_scrapingant:
         content = _fetch_via_scrapingant(sitemap_url)
 
     if content:
@@ -64,20 +64,20 @@ def fetch_urls_from_sitemap(sitemap_url):
 ALL_URLS = {}
 
 
-def fetch_urls_from_sitemap_recursive(sitemap_url, visited_sitemaps=None):
+def fetch_urls_from_sitemap_recursive(sitemap_url, visited_sitemaps=None, use_scrapingant=True):
     global ALL_URLS
     if visited_sitemaps is None:
         visited_sitemaps = set()
         ALL_URLS = {}
 
     visited_sitemaps.add(sitemap_url)
-    urls = fetch_urls_from_sitemap(sitemap_url)
+    urls = fetch_urls_from_sitemap(sitemap_url, use_scrapingant=use_scrapingant)
 
     for url, lastmod in urls.items():
         if not url.endswith(".xml"):
             ALL_URLS[url] = lastmod
 
         if url.endswith(".xml") and url not in visited_sitemaps:
-            fetch_urls_from_sitemap_recursive(url, visited_sitemaps)
+            fetch_urls_from_sitemap_recursive(url, visited_sitemaps, use_scrapingant=use_scrapingant)
 
     return ALL_URLS
