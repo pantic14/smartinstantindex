@@ -3,7 +3,7 @@ import logging
 import logging.config
 import os
 import re
-from datetime import date
+from datetime import date, datetime, timezone
 
 
 def load_json(file_path):
@@ -63,19 +63,71 @@ def normalize_config(config):
         site.setdefault("exclude_patterns", [])
         site.setdefault("include_patterns", [])
         site.setdefault("site_url", "")   # GSC property identifier; empty = GSC disabled
+        site.setdefault("auto_reindex_enabled", False)
+        site.setdefault("auto_reindex_days", 30)
 
     return config
 
 
+VALID_REINDEX_DAYS = [10, 20, 30, 45, 60]
+
+
 def migrate_urls(data):
-    """Convert legacy {url: bool} format to {url: {"indexed": bool, "lastmod": None}}."""
+    """Convert legacy {url: bool} format to {url: {"indexed": bool, "lastmod": None}}.
+
+    Ensures gsc_indexed defaults to False so smart-reindex selection works on legacy entries.
+    """
     migrated = {}
     for url, value in data.items():
         if isinstance(value, bool):
-            migrated[url] = {"indexed": value, "lastmod": None}
+            entry = {"indexed": value, "lastmod": None}
         else:
-            migrated[url] = value
+            entry = dict(value)
+        entry.setdefault("gsc_indexed", False)
+        migrated[url] = entry
     return migrated
+
+
+def select_stale_indexed_urls(urls, days_threshold, now=None):
+    """Return URLs that were submitted to the Indexing API more than `days_threshold`
+    days ago but are still not confirmed as indexed in Google Search Console.
+
+    `urls` is the per-URL state dict: ``{url: {"indexed": bool, "gsc_indexed": bool,
+    "indexed_at": str | datetime | None, ...}}``. The function is pure (does not
+    mutate the input) and is shared by the desktop (JSON state) and cloud (rows
+    serialized from Supabase).
+    """
+    if now is None:
+        now = datetime.now(timezone.utc)
+    if now.tzinfo is None:
+        now = now.replace(tzinfo=timezone.utc)
+
+    stale = []
+    for url, entry in urls.items():
+        if not isinstance(entry, dict):
+            continue
+        if not entry.get("indexed"):
+            continue
+        if entry.get("gsc_indexed"):
+            continue
+        raw = entry.get("indexed_at")
+        if not raw:
+            continue
+        ts = raw
+        if isinstance(ts, str):
+            try:
+                ts = datetime.fromisoformat(ts.replace("Z", "+00:00"))
+            except ValueError:
+                continue
+        if isinstance(ts, datetime):
+            if ts.tzinfo is None:
+                ts = ts.replace(tzinfo=timezone.utc)
+        else:
+            continue
+        age_days = (now - ts).total_seconds() / 86400.0
+        if age_days > days_threshold:
+            stale.append(url)
+    return stale
 
 
 def _matches(pattern, url):

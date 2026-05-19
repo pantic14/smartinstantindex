@@ -32,6 +32,7 @@ export default function SiteDetail({ site: siteName, navigate }: Props) {
 
   const logRef = useRef<HTMLDivElement>(null);
   const esRef = useRef<EventSource | null>(null);
+  const runSelAbortRef = useRef<AbortController | null>(null);
 
   function addLog(text: string, kind: InlineLog["kind"] = "info") {
     setPanel((p) => ({ ...p, log: [...p.log, { text, kind }] }));
@@ -51,7 +52,10 @@ export default function SiteDetail({ site: siteName, navigate }: Props) {
   useEffect(() => {
     loadSite();
     loadUrls();
-    return () => esRef.current?.close();
+    return () => {
+      esRef.current?.close();
+      runSelAbortRef.current?.abort();
+    };
   }, [siteName]);
 
   useEffect(() => {
@@ -115,8 +119,44 @@ export default function SiteDetail({ site: siteName, navigate }: Props) {
   function handleStop() {
     esRef.current?.close();
     esRef.current = null;
+    runSelAbortRef.current?.abort();
+    runSelAbortRef.current = null;
     addLog("Stopped by user", "error");
     setPanel((p) => ({ ...p, running: false }));
+  }
+
+  // --- Auto-reindex ---
+  function handleAutoReindex() {
+    if (esRef.current) esRef.current.close();
+    setPanel({ visible: true, running: true, title: "Smart reindex", log: [], progress: null });
+
+    const es = new EventSource(api.autoReindexStreamUrl(siteName));
+    esRef.current = es;
+
+    es.onmessage = (e) => {
+      const ev = JSON.parse(e.data);
+      if (ev.type === "status") addLog(ev.message);
+      if (ev.type === "done") {
+        addLog(`✓ ${ev.synced} synced · ${ev.reset} reset to pending`, "ok");
+        setPanel((p) => ({ ...p, running: false }));
+        es.close();
+        esRef.current = null;
+        loadSite();
+        loadUrls();
+      }
+      if (ev.type === "error") {
+        addLog(`✗ ${ev.message}`, "error");
+        setPanel((p) => ({ ...p, running: false }));
+        es.close();
+        esRef.current = null;
+      }
+    };
+    es.onerror = () => {
+      addLog("Connection lost", "error");
+      setPanel((p) => ({ ...p, running: false }));
+      es.close();
+      esRef.current = null;
+    };
   }
 
   // --- Sync GSC ---
@@ -185,6 +225,83 @@ export default function SiteDetail({ site: siteName, navigate }: Props) {
       loadSite();
     } catch (e: any) { alert(e.message); }
     finally { setUrlAction(false); }
+  }
+
+  async function handleRunSelected() {
+    if (selected.size === 0) return;
+    if (esRef.current) esRef.current.close();
+    const urlsList = [...selected];
+    setSelected(new Set());
+    setPanel({ visible: true, running: true, title: "Send selected to Indexing API", log: [], progress: null });
+
+    const ctrl = new AbortController();
+    runSelAbortRef.current = ctrl;
+
+    try {
+      const response = await fetch(
+        `http://localhost:7842/api/sites/${siteName}/run/selected/stream`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ urls: urlsList }),
+          signal: ctrl.signal,
+        }
+      );
+      if (!response.ok || !response.body) {
+        addLog(`✗ Failed to start (${response.status})`, "error");
+        setPanel((p) => ({ ...p, running: false }));
+        return;
+      }
+
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const chunks = buffer.split("\n\n");
+        buffer = chunks.pop() ?? "";
+
+        for (const chunk of chunks) {
+          const dataLine = chunk.split("\n").find((l) => l.startsWith("data: "));
+          if (!dataLine) continue;
+          const ev = JSON.parse(dataLine.slice(6));
+
+          if (ev.type === "connected") addLog("Connected…");
+          else if (ev.type === "plan") addLog(`${ev.pending} selected · ${ev.capacity} capacity`);
+          else if (ev.type === "indexed") {
+            setPanel((p) => ({
+              ...p,
+              log: [...p.log, { text: ev.url, kind: "url" }],
+              progress: { done: ev.done, total: ev.total },
+            }));
+            setUrls((prev) =>
+              prev.map((u) =>
+                u.url === ev.url ? { ...u, indexed: true, indexed_at: new Date().toISOString() } : u
+              )
+            );
+          } else if (ev.type === "quota_exhausted") addLog(`⚠ ${ev.message}`, "error");
+          else if (ev.type === "done") {
+            addLog(`✓ ${ev.indexed} sent · ${ev.pending} pending`, "ok");
+            setPanel((p) => ({ ...p, running: false }));
+            loadSite();
+            loadUrls();
+          } else if (ev.type === "error") {
+            addLog(`✗ ${ev.message}`, "error");
+            setPanel((p) => ({ ...p, running: false }));
+          }
+        }
+      }
+    } catch (e: any) {
+      if (e.name !== "AbortError") {
+        addLog(`✗ ${e.message}`, "error");
+        setPanel((p) => ({ ...p, running: false }));
+      }
+    } finally {
+      if (runSelAbortRef.current === ctrl) runSelAbortRef.current = null;
+    }
   }
 
   async function handleResetSelected() {
@@ -351,6 +468,21 @@ export default function SiteDetail({ site: siteName, navigate }: Props) {
         <Btn onClick={handleSyncGsc} disabled={urlAction || panel.running} variant="purple">
           Sync from GSC
         </Btn>
+        <div className="flex flex-col gap-1">
+          <Btn
+            onClick={handleAutoReindex}
+            disabled={urlAction || panel.running || !site?.site_url}
+            variant="purple"
+            title={!site?.site_url ? "Configure GSC site URL first" : undefined}
+          >
+            Smart reindex now
+          </Btn>
+          {site?.site_url && (
+            <span className="text-xs" style={{ color: "var(--color-muted)" }}>
+              Retries URLs older than {site.auto_reindex_days ?? 30} days not in GSC.
+            </span>
+          )}
+        </div>
         <div className="w-px mx-1" style={{ background: "var(--color-rim)" }} />
         <Btn onClick={handleResetAll} disabled={urlAction || panel.running} variant="ghost">
           Reset all
@@ -361,7 +493,15 @@ export default function SiteDetail({ site: siteName, navigate }: Props) {
             <span className="self-center text-sm" style={{ color: "var(--color-muted)" }}>
               {selected.size} selected
             </span>
-            <Btn onClick={handleMarkIndexed} disabled={urlAction} variant="green">
+            <Btn
+              onClick={handleRunSelected}
+              disabled={urlAction || panel.running || !site?.credentials?.length}
+              variant="accent"
+              title={!site?.credentials?.length ? "No credentials configured" : undefined}
+            >
+              Send to index ({selected.size})
+            </Btn>
+            <Btn onClick={handleMarkIndexed} disabled={urlAction || panel.running} variant="green">
               Mark sent
             </Btn>
             <Btn onClick={handleResetSelected} disabled={urlAction} variant="warn">
@@ -573,11 +713,13 @@ function Btn({
   onClick,
   disabled,
   variant,
+  title,
 }: {
   children: React.ReactNode;
   onClick: () => void;
   disabled?: boolean;
-  variant: "dark" | "purple" | "ghost" | "green" | "warn";
+  variant: "dark" | "purple" | "ghost" | "green" | "warn" | "accent";
+  title?: string;
 }) {
   const styles: Record<string, React.CSSProperties> = {
     dark: { background: "#21262d", color: "#e6edf3", border: "1px solid var(--color-rim)" },
@@ -585,12 +727,14 @@ function Btn({
     ghost: { background: "transparent", color: "var(--color-muted)", border: "1px solid var(--color-rim)" },
     green: { background: "rgba(63,185,80,0.1)", color: "var(--color-success)", border: "1px solid rgba(63,185,80,0.3)" },
     warn: { background: "rgba(210,153,34,0.1)", color: "var(--color-warn)", border: "1px solid rgba(210,153,34,0.3)" },
+    accent: { background: "var(--color-accent)", color: "#fff", border: "none" },
   };
 
   return (
     <button
       onClick={onClick}
       disabled={disabled}
+      title={title}
       className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium disabled:opacity-40 transition-opacity"
       style={styles[variant]}
     >

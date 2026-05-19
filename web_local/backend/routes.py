@@ -29,7 +29,7 @@ from smartinstantindex.utils import (
     load_json, save_urls_to_file, normalize_config,
     migrate_urls, filter_urls, build_indexing_plan,
     update_quota_batch, get_quota_remaining, QUOTA_LIMIT,
-    DEFAULT_SKIP_EXTENSIONS,
+    DEFAULT_SKIP_EXTENSIONS, VALID_REINDEX_DAYS, select_stale_indexed_urls,
 )
 from smartinstantindex.sitemaps import fetch_urls_from_sitemap_recursive
 from smartinstantindex.indexing import index_url
@@ -104,6 +104,7 @@ def site_stats(site: dict) -> dict:
         "track_lastmod": site.get("track_lastmod", False),
         "schedule_enabled": site.get("schedule_enabled", False),
         "schedule_hour": site.get("schedule_hour", 8),
+        "auto_reindex_days": site.get("auto_reindex_days", 30),
         "skip_extensions": site.get("skip_extensions", DEFAULT_SKIP_EXTENSIONS),
         "exclude_patterns": site.get("exclude_patterns", []),
         "include_patterns": site.get("include_patterns", []),
@@ -196,6 +197,7 @@ class SiteCreate(BaseModel):
     skip_extensions: list[str] = DEFAULT_SKIP_EXTENSIONS
     exclude_patterns: list[str] = []
     include_patterns: list[str] = []
+    auto_reindex_days: int = 30
 
 
 @app.post("/api/sites")
@@ -204,6 +206,9 @@ def create_site(body: SiteCreate):
     names = [s["name"] for s in config.get("sites", [])]
     if body.name in names:
         raise HTTPException(status_code=409, detail="Site name already exists")
+
+    if body.auto_reindex_days not in VALID_REINDEX_DAYS:
+        raise HTTPException(status_code=400, detail="invalid_auto_reindex_days")
 
     site = {
         "name": body.name,
@@ -215,6 +220,7 @@ def create_site(body: SiteCreate):
         "skip_extensions": body.skip_extensions,
         "exclude_patterns": body.exclude_patterns,
         "include_patterns": body.include_patterns,
+        "auto_reindex_days": body.auto_reindex_days,
     }
     config.setdefault("sites", []).append(site)
     save_config(config)
@@ -229,6 +235,7 @@ class SiteUpdate(BaseModel):
     skip_extensions: Optional[list[str]] = None
     exclude_patterns: Optional[list[str]] = None
     include_patterns: Optional[list[str]] = None
+    auto_reindex_days: Optional[int] = None
 
 
 @app.put("/api/sites/{name}")
@@ -236,7 +243,10 @@ def update_site(name: str, body: SiteUpdate):
     config = get_config()
     for site in config.get("sites", []):
         if site["name"] == name:
-            for field, val in body.model_dump(exclude_none=True).items():
+            updates = body.model_dump(exclude_none=True)
+            if "auto_reindex_days" in updates and updates["auto_reindex_days"] not in VALID_REINDEX_DAYS:
+                raise HTTPException(status_code=400, detail="invalid_auto_reindex_days")
+            for field, val in updates.items():
                 site[field] = val
             save_config(config)
             return site_stats(site)
@@ -502,6 +512,7 @@ def sync_gsc_stream(name: str):
             for url in existing:
                 if url.rstrip("/") in gsc_normalized:
                     existing[url]["sc_synced_at"] = today
+                    existing[url]["gsc_indexed"] = True
                     synced += 1
                     if not existing[url].get("indexed"):
                         existing[url]["indexed"] = True
@@ -511,6 +522,115 @@ def sync_gsc_stream(name: str):
             yield send({"type": "done", "synced": synced, "total": len(gsc_pages)})
         except Exception as e:
             yield send({"type": "error", "message": str(e)})
+
+    return StreamingResponse(generate(), media_type="text/event-stream", headers={"Cache-Control": "no-cache"})
+
+
+# --- Auto-reindex ---
+
+_auto_reindex_locks: dict[str, threading.Lock] = {}
+
+
+def _get_auto_reindex_lock(name: str) -> threading.Lock:
+    lock = _auto_reindex_locks.get(name)
+    if lock is None:
+        lock = threading.Lock()
+        _auto_reindex_locks[name] = lock
+    return lock
+
+
+def _do_sync_and_reindex(site: dict) -> dict:
+    """Shared implementation: sync GSC, then reset stale URLs to pending.
+    Returns {"gsc_found", "synced", "reset"} or raises on failure.
+    """
+    if not site.get("site_url"):
+        raise ValueError("auto_reindex_requires_gsc")
+    creds = site.get("credentials") or []
+    if not creds:
+        raise ValueError("no_credentials")
+
+    gsc_pages = fetch_indexed_pages(site["site_url"], str(creds_path(creds[0])))
+    gsc_normalized = {u.rstrip("/").lower() for u in gsc_pages}
+
+    existing = load_urls(site)
+    today = str(date.today())
+    synced = 0
+    for url, entry in existing.items():
+        if url.rstrip("/").lower() in gsc_normalized:
+            entry["gsc_indexed"] = True
+            entry["sc_synced_at"] = today
+            if not entry.get("indexed"):
+                entry["indexed"] = True
+                entry["indexed_at"] = today
+            synced += 1
+
+    days = int(site.get("auto_reindex_days", 30))
+    stale = select_stale_indexed_urls(existing, days)
+    for url in stale:
+        existing[url]["indexed"] = False
+        existing[url].pop("indexed_at", None)
+
+    save_urls_to_file(existing, str(urls_path(site)))
+    # Persist last-run timestamp in a sibling marker file (kept out of urls JSON
+    # so the URL state stays a flat {url: entry} mapping).
+    try:
+        marker = DATA_DIR / f"auto_reindex_{site['name']}.json"
+        marker.write_text(json.dumps({"last_run_at": datetime.utcnow().isoformat() + "Z"}))
+    except Exception:
+        pass
+    return {"gsc_found": len(gsc_pages), "synced": synced, "reset": len(stale)}
+
+
+def run_desktop_auto_reindex(site_name: str) -> dict:
+    """Public entry point called by the background scheduler and the manual endpoint."""
+    site = get_site(site_name)
+    lock = _get_auto_reindex_lock(site_name)
+    with lock:
+        return _do_sync_and_reindex(site)
+
+
+@app.get("/api/sites/{name}/auto-reindex/run/stream")
+def auto_reindex_run_stream(name: str):
+    site = get_site(name)
+
+    def generate():
+        def send(event: dict) -> str:
+            return f"data: {json.dumps(event)}\n\n"
+
+        yield send({"type": "connected"})
+
+        if not site.get("site_url"):
+            yield send({"type": "error", "message": "auto_reindex_requires_gsc"})
+            return
+
+        lock = _get_auto_reindex_lock(name)
+        if not lock.acquire(blocking=False):
+            yield send({"type": "error", "message": "Auto-reindex already running for this site"})
+            return
+
+        try:
+            yield send({"type": "status", "message": "Connecting to Google Search Console..."})
+            result = _do_sync_and_reindex(site)
+            yield send({
+                "type": "status",
+                "message": f"GSC: {result['gsc_found']} pages, {result['synced']} URLs synced",
+            })
+            days = int(site.get("auto_reindex_days", 30))
+            yield send({
+                "type": "status",
+                "message": f"URLs older than {days} days reset: {result['reset']}",
+            })
+            yield send({
+                "type": "done",
+                "synced": result["synced"],
+                "reset": result["reset"],
+                "gsc_found": result["gsc_found"],
+                "days": days,
+            })
+        except Exception as e:
+            yield send({"type": "error", "message": str(e)})
+        finally:
+            lock.release()
 
     return StreamingResponse(generate(), media_type="text/event-stream", headers={"Cache-Control": "no-cache"})
 

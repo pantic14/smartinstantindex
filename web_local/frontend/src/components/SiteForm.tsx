@@ -10,7 +10,10 @@ interface Site {
   skip_extensions: string[];
   exclude_patterns: string[];
   include_patterns: string[];
+  auto_reindex_days?: number;
 }
+
+const VALID_REINDEX_DAYS = [10, 20, 30, 45, 60];
 
 interface Props {
   site: Site | null;
@@ -35,6 +38,7 @@ export default function SiteForm({ site, onClose, onSaved }: Props) {
   const [includePatterns, setIncludePatterns] = useState(
     (site?.include_patterns ?? []).join("\n")
   );
+  const [autoReindexDays, setAutoReindexDays] = useState(site?.auto_reindex_days ?? 30);
   const [availableCreds, setAvailableCreds] = useState<{ filename: string; client_email: string }[]>([]);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
@@ -60,6 +64,7 @@ export default function SiteForm({ site, onClose, onSaved }: Props) {
           .filter(Boolean),
         exclude_patterns: excludePatterns.split("\n").map((s) => s.trim()).filter(Boolean),
         include_patterns: includePatterns.split("\n").map((s) => s.trim()).filter(Boolean),
+        auto_reindex_days: autoReindexDays,
       };
       if (site) {
         await api.updateSite(site.name, payload);
@@ -205,6 +210,44 @@ export default function SiteForm({ site, onClose, onSaved }: Props) {
               className="input resize-none font-mono text-xs"
             />
           </Field>
+
+          <div
+            className="space-y-2.5 p-3 rounded-md border"
+            style={{ borderColor: "var(--color-rim)", background: "rgba(255,255,255,0.02)" }}
+          >
+            <div className="text-xs font-semibold uppercase tracking-wide" style={{ color: "var(--color-muted)" }}>
+              Smart features
+            </div>
+            <div className="space-y-1">
+              <div className="text-sm font-medium">Smart reindex threshold</div>
+              <p className="text-xs" style={{ color: "var(--color-muted)" }}>
+                URLs sent to Google but not confirmed in GSC after this many days will be reset to pending when you click "Smart reindex now" on the site panel. Requires a Google Search Console property URL.
+              </p>
+            </div>
+            <div className="space-y-1">
+              <label className="text-xs" style={{ color: "var(--color-muted)" }}>
+                Retry URLs older than
+              </label>
+              <select
+                value={autoReindexDays}
+                onChange={(e) => setAutoReindexDays(Number(e.target.value))}
+                className="input"
+                style={{ width: "auto" }}
+              >
+                {VALID_REINDEX_DAYS.map((d) => (
+                  <option key={d} value={d}>{d} days</option>
+                ))}
+              </select>
+            </div>
+            {!siteUrl.trim() && (
+              <p
+                className="text-xs p-2 rounded"
+                style={{ background: "rgba(248,81,73,0.1)", color: "var(--color-danger)" }}
+              >
+                Configure the Search Console property URL above to use Smart reindex.
+              </p>
+            )}
+          </div>
 
           <div className="flex gap-2 pt-2">
             <button
