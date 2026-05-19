@@ -166,6 +166,7 @@ logging.conf
 credentials*.json
 urls*.json
 quota.json
+auto_reindex*
 
 venvlinux/
 winvenv/
