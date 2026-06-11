@@ -76,9 +76,17 @@ There are two GUI entry points:
 
 `DATA_DIR` is the exe folder when frozen (PyInstaller), the script folder otherwise. All JSON data files are resolved relative to `DATA_DIR`. The web static files are bundled into `sys._MEIPASS/static` when frozen.
 
-## Known gotcha in sitemaps.py
+## sitemaps.py reentrancy
 
-`fetch_urls_from_sitemap_recursive` uses a mutable default argument (`visited_sitemaps=set()`). This set persists across calls in the same process, so running indexing more than once per process (e.g. via the GUI's "Run Indexing" button) will skip all sitemaps visited in prior runs. The global `ALL_URLS` reset partially mitigates this but the visited set is never cleared.
+`fetch_urls_from_sitemap_recursive` is reentrant: the visited-sitemaps set and the
+URL accumulator are created fresh on each top-level call and threaded down through
+the recursion via the internal `_collected` argument (do not pass it from outside).
+Concurrent calls for different sites are safe and never share state.
+
+> Historical note: this function previously accumulated into a module-level global
+> (`ALL_URLS`). Under concurrency (the cloud scheduler firing several sites at once,
+> or simultaneous SSE runs) that caused URLs from different sites to bleed into each
+> other and be persisted under the wrong `site_id`. Fixed by removing the global.
 
 ## Google API quota note
 

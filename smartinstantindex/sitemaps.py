@@ -61,23 +61,29 @@ def fetch_urls_from_sitemap(sitemap_url, use_scrapingant=True):
         return {}
 
 
-ALL_URLS = {}
+def fetch_urls_from_sitemap_recursive(sitemap_url, visited_sitemaps=None, use_scrapingant=True, _collected=None):
+    """Recursively collect ``{url: lastmod}`` from a sitemap (handles sitemap indexes).
 
-
-def fetch_urls_from_sitemap_recursive(sitemap_url, visited_sitemaps=None, use_scrapingant=True):
-    global ALL_URLS
+    The accumulator (``_collected``) and the visited set are created fresh on the
+    top-level call and threaded down through the recursion, so the function is
+    fully reentrant: concurrent calls for different sites never share state.
+    Do not pass ``_collected`` from outside; it is an internal recursion argument.
+    """
     if visited_sitemaps is None:
         visited_sitemaps = set()
-        ALL_URLS = {}
+    if _collected is None:
+        _collected = {}
 
     visited_sitemaps.add(sitemap_url)
     urls = fetch_urls_from_sitemap(sitemap_url, use_scrapingant=use_scrapingant)
 
     for url, lastmod in urls.items():
-        if not url.endswith(".xml"):
-            ALL_URLS[url] = lastmod
+        if url.endswith(".xml"):
+            if url not in visited_sitemaps:
+                fetch_urls_from_sitemap_recursive(
+                    url, visited_sitemaps, use_scrapingant=use_scrapingant, _collected=_collected
+                )
+        else:
+            _collected[url] = lastmod
 
-        if url.endswith(".xml") and url not in visited_sitemaps:
-            fetch_urls_from_sitemap_recursive(url, visited_sitemaps, use_scrapingant=use_scrapingant)
-
-    return ALL_URLS
+    return _collected
